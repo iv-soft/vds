@@ -156,6 +156,16 @@ vds::expected<std::shared_ptr<vds::udp_socket>> vds::udp_socket::create(
     return vds::make_unexpected<std::system_error>(error, std::system_category(), "create socket");
   }
 
+  /*************************************************************/
+  /* Allow socket descriptor to be reuseable                   */
+  /*************************************************************/
+  int on = 1;
+  if (0 > setsockopt(s, SOL_SOCKET, SO_REUSEADDR, (char*)&on, sizeof(on))) {
+    auto error = errno;
+    ::close(s);
+    return vds::make_unexpected<std::system_error>(error, std::system_category(), "Allow socket descriptor to be reuseable");
+  }
+
   if (af == AF_INET6) {
     int no = 0;
     if (setsockopt(s, IPPROTO_IPV6, IPV6_V6ONLY, (char *)&no, sizeof(no)) < 0) {
