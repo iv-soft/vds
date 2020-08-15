@@ -211,8 +211,11 @@ vds::expected<void> vds::udp_socket::join_membership(sa_family_t af, const std::
   if (AF_INET6 == af) {
     struct ipv6_mreq group;
     group.ipv6mr_interface = 0;
-    inet_pton(AF_INET6, group_address.c_str(), &group.ipv6mr_multiaddr);
-    if (setsockopt((*this)->handle(), IPPROTO_IPV6, IPV6_ADD_MEMBERSHIP, (const char *)&group, sizeof group) < 0) {
+    if (0 > inet_pton(AF_INET6, group_address.c_str(), &group.ipv6mr_multiaddr)) {
+      int error = errno;
+      return make_unexpected<std::system_error>(error, std::generic_category(), "parse address " + group_address);
+    }
+    if (0 > setsockopt((*this)->handle(), IPPROTO_IPV6, IPV6_ADD_MEMBERSHIP, (const char *)&group, sizeof group)) {
       int error = errno;
       return make_unexpected<std::system_error>(error, std::generic_category(), "set broadcast");
     }
@@ -232,7 +235,10 @@ vds::expected<void> vds::udp_socket::broadcast(sa_family_t af, const std::string
 {
   if (AF_INET6 == af) {
     struct sockaddr_in6 address = { AF_INET6, htons(port) };
-    inet_pton(AF_INET6, group_address.c_str(), &address.sin6_addr);
+    if (0 > inet_pton(AF_INET6, group_address.c_str(), &address.sin6_addr)) {
+      int error = errno;
+      return make_unexpected<std::system_error>(error, std::generic_category(), "parse address " + group_address);
+    }
 
     if (sendto((*this)->handle(), (const char *)message.data(), message.size(), 0, (struct sockaddr*)&address, sizeof(address)) < 0) {
       int error = errno;

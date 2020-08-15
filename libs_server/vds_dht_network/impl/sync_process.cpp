@@ -335,7 +335,6 @@ vds::expected<void> vds::dht::network::sync_process::sync_replicas(
             }
           }
         }
-
       }
       WHILE_EXPECTED_END()
   }
