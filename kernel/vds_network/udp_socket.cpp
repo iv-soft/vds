@@ -233,12 +233,11 @@ vds::expected<void> vds::udp_socket::join_membership(sa_family_t af, const std::
       return make_unexpected<std::system_error>(error, std::generic_category(), "set broadcast");
     }
   }
-  else {
-    char broadcast = '1';
-    if (setsockopt((*this)->handle(), SOL_SOCKET, SO_BROADCAST, &broadcast, sizeof(broadcast)) < 0) {
-      int error = errno;
-      return make_unexpected<std::system_error>(error, std::generic_category(), "set broadcast");
-    }
+
+  char broadcast = '1';
+  if (setsockopt((*this)->handle(), SOL_SOCKET, SO_BROADCAST, &broadcast, sizeof(broadcast)) < 0) {
+    int error = errno;
+    return make_unexpected<std::system_error>(error, std::generic_category(), "set broadcast");
   }
 
   return expected<void>();
