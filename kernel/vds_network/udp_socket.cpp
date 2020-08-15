@@ -226,6 +226,12 @@ vds::expected<void> vds::udp_socket::join_membership(sa_family_t af, const std::
       return make_unexpected<std::system_error>(error, std::generic_category(), "parse address " + group_address);
     }
 
+    int ifidx = 0;
+    if (setsockopt((*this)->handle(), IPPROTO_IPV6, IPV6_MULTICAST_IF, (const char*)&ifidx, sizeof(ifidx))) {
+      int error = errno;
+      return make_unexpected<std::system_error>(error, std::generic_category(), "set multicast interface");
+    }
+
     int loopBack = 0;
     if (0 > setsockopt((*this)->handle(), IPPROTO_IPV6, IPV6_MULTICAST_LOOP, (const char*)&loopBack, sizeof(loopBack))) {
       int error = errno;
