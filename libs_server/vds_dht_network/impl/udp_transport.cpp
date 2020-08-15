@@ -39,11 +39,11 @@ vds::async_task<vds::expected<void>> vds::dht::network::udp_transport::start(
       return unexpected(std::move(result.error()));
     }
     else {
-      (void)this->server_.socket()->join_membership(AF_INET, "ff02::1");
+      (void)this->server_.socket()->join_membership(AF_INET, "FF02::1");
     }
   }
   else {
-    (void)this->server_.socket()->join_membership(AF_INET6, "ff02::1");
+    (void)this->server_.socket()->join_membership(AF_INET6, "FF02::1");
   }
 
   this->reader_ = std::get<0>(result.value());
@@ -146,7 +146,7 @@ vds::expected<void> vds::dht::network::udp_transport::broadcast_handshake()
   CHECK_EXPECTED(out_message.add(bs.move_data()));
   
   auto message = out_message.move_data();
-  (void)this->server_.socket()->broadcast(this->server_.socket()->family(), "ff02::1", 8050, message);
+  (void)this->server_.socket()->broadcast(this->server_.socket()->family(), "FF02::1", 8050, message);
 
   return expected<void>();
 }

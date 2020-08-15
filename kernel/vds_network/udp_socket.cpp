@@ -222,7 +222,7 @@ vds::expected<void> vds::udp_socket::join_membership(sa_family_t af, const std::
       return make_unexpected<std::system_error>(error, std::generic_category(), "set multicast loop");
     }
     
-    int mcastTTL = 8;
+    int mcastTTL = 1;
     if (0 > setsockopt((*this)->handle(), IPPROTO_IPV6, IPV6_MULTICAST_HOPS, (const char*)&mcastTTL, sizeof(mcastTTL))) {
       int error = errno;
       return make_unexpected<std::system_error>(error, std::generic_category(), "set multicast hops");
