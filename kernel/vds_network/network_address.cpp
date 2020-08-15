@@ -274,7 +274,7 @@ vds::network_address::network_address(
       auto addr = (sockaddr_in6 *) &this->addr_;
       addr->sin6_family = af;
       addr->sin6_port = htons(port);
-      addr->sin6_addr = IN6ADDR_ANY_INIT;
+      addr->sin6_addr = IN6ADDR_ALLNODESONLINK_INIT;// IN6ADDR_ANY_INIT;
 
       this->addr_size_ = sizeof(sockaddr_in6);
       break;
