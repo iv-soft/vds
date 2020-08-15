@@ -215,6 +215,19 @@ vds::expected<void> vds::udp_socket::join_membership(sa_family_t af, const std::
       int error = errno;
       return make_unexpected<std::system_error>(error, std::generic_category(), "parse address " + group_address);
     }
+
+    int loopBack = 0;
+    if (0 > setsockopt((*this)->handle(), IPPROTO_IPV6, IPV6_MULTICAST_LOOP, (const char*)&loopBack, sizeof(loopBack))) {
+      int error = errno;
+      return make_unexpected<std::system_error>(error, std::generic_category(), "set multicast loop");
+    }
+    
+    int mcastTTL = 8;
+    if (0 > setsockopt((*this)->handle(), IPPROTO_IPV6, IPV6_MULTICAST_HOPS, (const char*)&mcastTTL, sizeof(mcastTTL))) {
+      int error = errno;
+      return make_unexpected<std::system_error>(error, std::generic_category(), "set multicast hops");
+    }
+
     if (0 > setsockopt((*this)->handle(), IPPROTO_IPV6, IPV6_ADD_MEMBERSHIP, (const char *)&group, sizeof group)) {
       int error = errno;
       return make_unexpected<std::system_error>(error, std::generic_category(), "set broadcast");
