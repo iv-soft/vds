@@ -21,10 +21,6 @@ vds::udp_datagram::udp_datagram(vds::_udp_datagram* impl)
 {
 }
 
-vds::async_task<vds::expected<vds::udp_datagram>> vds::udp_datagram_reader::read_async() {
-  return static_cast<_udp_receive *>(this)->read_async();
-}
-
 vds::udp_datagram::udp_datagram(
   const network_address & address,
   const void* data,
@@ -104,39 +100,36 @@ sa_family_t vds::udp_socket::family() const
 
 #ifdef _WIN32
 
-std::tuple<std::shared_ptr<vds::udp_datagram_reader>, std::shared_ptr<vds::udp_datagram_writer>>
-vds::udp_socket::start(const service_provider * sp)
+vds::expected<std::shared_ptr<vds::udp_datagram_writer>>
+vds::udp_socket::start(const service_provider * sp, lambda_holder_t<async_task<expected<bool>>, expected<udp_datagram>> read_handler)
 {
-  return {
-  std::make_shared<_udp_receive>(sp, this->shared_from_this()),
-  std::make_shared<_udp_send>(sp, this->shared_from_this())
-  };
+  auto reader = new _udp_receive(sp, this->shared_from_this(), std::move(read_handler));
+  reader->schedule_read();
+
+  return std::make_shared<_udp_send>(sp, this->shared_from_this());
 }
 
 #else//_WIN32
-std::tuple<std::shared_ptr<vds::udp_datagram_reader>, std::shared_ptr<vds::udp_datagram_writer>>
-vds::udp_socket::start(const service_provider * sp)
+vds::expected<std::shared_ptr<vds::udp_datagram_writer>>
+vds::udp_socket::start(const service_provider * sp, lambda_holder_t<async_task<expected<bool>>, expected<udp_datagram>> read_handler)
 {
-  return this->impl_->start(sp, this->shared_from_this());
+  return this->impl_->start(sp, this->shared_from_this(), std::move(read_handler));
 }
 
-std::tuple<
-  std::shared_ptr<vds::udp_datagram_reader>,
-  std::shared_ptr<vds::udp_datagram_writer>>
-  vds::_udp_socket::start(
-    const vds::service_provider *sp,
-    const std::shared_ptr<vds::socket_base> &owner) {
+vds::expected<std::shared_ptr<vds::udp_datagram_writer>>
+vds::_udp_socket::start(
+  const vds::service_provider *sp,
+  const std::shared_ptr<vds::socket_base> &owner,
+  lambda_holder_t<async_task<expected<bool>>, expected<udp_datagram>> read_handler) {
 
-  auto read_task = std::make_shared<_udp_receive>(sp, owner);
+  auto read_task = std::make_shared<_udp_receive>(sp, owner, std::move(read_handler));
   auto write_task = std::make_shared<_udp_send>(sp, owner);
 
   this->read_task_ = read_task;
   this->write_task_ = write_task;
 
-  return {
-    read_task,
-    write_task
-  };
+  CHECK_EXPECTED(read_task->schedule_read());
+  return write_task;
 }
 #endif
 
@@ -226,11 +219,11 @@ vds::expected<void> vds::udp_socket::join_membership(sa_family_t af, const std::
       return make_unexpected<std::system_error>(error, std::generic_category(), "parse address " + group_address);
     }
 
-    int ifidx = 0;
-    if (setsockopt((*this)->handle(), IPPROTO_IPV6, IPV6_MULTICAST_IF, (const char*)&ifidx, sizeof(ifidx))) {
-      int error = errno;
-      return make_unexpected<std::system_error>(error, std::generic_category(), "set multicast interface");
-    }
+    //int ifidx = 0;
+    //if (setsockopt((*this)->handle(), IPPROTO_IPV6, IPV6_MULTICAST_IF, (const char*)&ifidx, sizeof(ifidx))) {
+    //  int error = errno;
+    //  return make_unexpected<std::system_error>(error, std::generic_category(), "set multicast interface");
+    //}
 
     int loopBack = 0;
     if (0 > setsockopt((*this)->handle(), IPPROTO_IPV6, IPV6_MULTICAST_LOOP, (const char*)&loopBack, sizeof(loopBack))) {
@@ -246,14 +239,14 @@ vds::expected<void> vds::udp_socket::join_membership(sa_family_t af, const std::
 
     if (0 > setsockopt((*this)->handle(), IPPROTO_IPV6, IPV6_ADD_MEMBERSHIP, (const char *)&group, sizeof group)) {
       int error = errno;
-      return make_unexpected<std::system_error>(error, std::generic_category(), "set broadcast");
+      return make_unexpected<std::system_error>(error, std::generic_category(), "IPV6_ADD_MEMBERSHIP " + group_address);
     }
-  }
-
-  char broadcast = '1';
-  if (setsockopt((*this)->handle(), SOL_SOCKET, SO_BROADCAST, &broadcast, sizeof(broadcast)) < 0) {
-    int error = errno;
-    return make_unexpected<std::system_error>(error, std::generic_category(), "set broadcast");
+  } else {
+    int broadcast = 1;
+    if (setsockopt((*this)->handle(), SOL_SOCKET, SO_BROADCAST, (const char*)&broadcast, sizeof(broadcast)) < 0) {
+      int error = errno;
+      return make_unexpected<std::system_error>(error, std::generic_category(), "set broadcast " + group_address);
+    }
   }
 
   return expected<void>();
@@ -335,13 +328,14 @@ vds::udp_server::~udp_server()
   delete this->impl_;
 }
 
-vds::expected<std::tuple<std::shared_ptr<vds::udp_datagram_reader>, std::shared_ptr<vds::udp_datagram_writer>>> vds::udp_server::start(
+vds::expected<std::shared_ptr<vds::udp_datagram_writer>> vds::udp_server::start(
   const service_provider * sp,
-  const network_address & address)
+  const network_address & address,
+  lambda_holder_t<async_task<expected<bool>>, expected<udp_datagram>> read_handler)
 {
   vds_assert(nullptr == this->impl_);
   this->impl_ = new _udp_server(address);
-  return this->impl_->start(sp);
+  return this->impl_->start(sp, std::move(read_handler));
 }
 
 void vds::udp_server::stop()
@@ -364,26 +358,5 @@ const vds::network_address& vds::udp_server::address() const {
 
 void vds::udp_server::prepare_to_stop() {
   this->impl_->prepare_to_stop();
-}
-
-vds::udp_client::udp_client()
-{
-}
-
-vds::udp_client::~udp_client()
-{
-}
-
-vds::expected<std::tuple<std::shared_ptr<vds::udp_datagram_reader>, std::shared_ptr<vds::udp_datagram_writer>>>
-vds::udp_client::start(
-  const service_provider * sp,
-    sa_family_t af) {
-  vds_assert(nullptr == this->impl_);
-  this->impl_ = new _udp_client();
-  return this->impl_->start(sp, af);
-}
-
-void vds::udp_client::stop()
-{
 }
 

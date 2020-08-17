@@ -27,8 +27,14 @@ namespace vds {
 
 
     network_address(
-        sa_family_t af,
-        uint16_t port);
+        struct sockaddr* ai_addr,
+        size_t ai_addrlen);
+
+    network_address(
+      sa_family_t af,
+      uint16_t port);
+
+    void set_port(uint16_t port);
 
     //static network_address ip4(
     //    const std::string & server,

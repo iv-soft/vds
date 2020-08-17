@@ -8,6 +8,7 @@ All rights reserved
 
 #include "service_provider.h"
 #include "asymmetriccrypto.h"
+#include "network_service.h"
 
 namespace vds {
   class udp_datagram;
@@ -16,12 +17,12 @@ namespace vds {
     namespace network {
       class iudp_transport : public std::enable_shared_from_this<iudp_transport> {
       public:
-        virtual async_task<expected<void>> start(
-          const service_provider * sp,
-          const std::shared_ptr<asymmetric_public_key> & node_public_key,
-          const std::shared_ptr<asymmetric_private_key> & node_key,
-          uint16_t port,
-          bool dev_network) = 0;
+        //virtual async_task<expected<void>> start(
+        //  const service_provider * sp,
+        //  const std::shared_ptr<asymmetric_public_key> & node_public_key,
+        //  const std::shared_ptr<asymmetric_private_key> & node_key,
+        //  const network_service::network_iterface& bind_interface,
+        //  bool dev_network) = 0;
 
         virtual void stop() = 0;
 

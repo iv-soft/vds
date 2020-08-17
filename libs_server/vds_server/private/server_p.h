@@ -85,7 +85,7 @@ namespace vds {
     timer update_timer_;
 
 	  std::unique_ptr<class db_model> db_model_;
-    std::shared_ptr<dht::network::iudp_transport> udp_transport_;
+    //std::shared_ptr<dht::network::iudp_transport> udp_transport_;
     std::unique_ptr<dht::network::service> dht_network_service_;
 
     std::shared_ptr<transaction_log::sync_process> transaction_log_sync_process_;

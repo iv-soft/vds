@@ -16,25 +16,25 @@ vds::dht::network::dht_session::dht_session(
   const const_data_buffer& this_node_id,
   asymmetric_public_key partner_node_key,
   const const_data_buffer& partner_node_id,
-  const const_data_buffer& session_key) noexcept
+  const const_data_buffer& session_key,
+  std::shared_ptr<iudp_transport> transport) noexcept
   : base_class(
       sp,
       address,
       this_node_id,
       std::move(partner_node_key),
       partner_node_id,
-      session_key) {
+      session_key,
+      std::move(transport)) {
 }
 
 vds::async_task<vds::expected<void>> vds::dht::network::dht_session::ping_node(
-  const const_data_buffer& node_id,
-  const std::shared_ptr<iudp_transport>& transport) {
+  const const_data_buffer& node_id) {
 
   GET_EXPECTED(message,
     message_create<messages::dht_ping>(
       std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now().time_since_epoch()).count()));
   return this->send_message(
-    transport,
     (uint8_t)messages::dht_ping::message_id,
     node_id,
     message_serialize(message));
@@ -53,7 +53,6 @@ vds::session_statistic::session_info vds::dht::network::dht_session::get_statist
 }
 
 vds::async_task<vds::expected<bool>> vds::dht::network::dht_session::process_message(
-  const std::shared_ptr<iudp_transport>& transport,
   uint8_t message_type,
   const const_data_buffer & target_node,
   const std::vector<const_data_buffer> & hops,

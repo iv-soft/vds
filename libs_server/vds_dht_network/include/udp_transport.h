@@ -12,6 +12,7 @@ All rights reserved
 #include "debug_mutex.h"
 #include "iudp_transport.h"
 #include "thread_apartment.h"
+#include "network_address.h"
 
 namespace vds {
   struct session_statistic;
@@ -29,12 +30,12 @@ namespace vds {
         udp_transport(udp_transport&&) = delete;
         ~udp_transport();
 
-        async_task<expected<void>> start(
+        expected<void> start(
           const service_provider * sp,
           const std::shared_ptr<asymmetric_public_key> & node_public_key,
           const std::shared_ptr<asymmetric_private_key> & node_key,
-          uint16_t port,
-          bool dev_network) override;
+          const network_address & bind_interface,
+          bool dev_network);
 
         void stop() override;
 
@@ -57,7 +58,6 @@ namespace vds {
         std::shared_ptr<asymmetric_private_key> node_key_;
         udp_server server_;
 
-        std::shared_ptr<vds::udp_datagram_reader> reader_;
         std::shared_ptr<vds::udp_datagram_writer> writer_;
 
         std::shared_ptr<thread_apartment> send_thread_;
@@ -88,7 +88,7 @@ namespace vds {
         mutable std::shared_mutex sessions_mutex_;
         std::map<network_address, session_state> sessions_;
 
-        vds::async_task<vds::expected<void>> continue_read();
+        vds::async_task<vds::expected<bool>> read_handler(expected<udp_datagram> result);
       };
     }
   }

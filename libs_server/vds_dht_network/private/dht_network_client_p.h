@@ -46,13 +46,16 @@ namespace vds {
 
         _client(
           const service_provider * sp,
-          const std::shared_ptr<iudp_transport> & udp_transport,
           const const_data_buffer & this_node_id);
 
         static expected<std::shared_ptr<_client>> create(
           const service_provider * sp,
-          const std::shared_ptr<iudp_transport> & udp_transport,
-          const std::shared_ptr<asymmetric_public_key> & node_public_key);
+          const std::shared_ptr<asymmetric_public_key> & node_public_key,
+          const std::shared_ptr<asymmetric_private_key>& node_key,
+          uint16_t port,
+          bool dev_network);
+
+        void add_transport(std::shared_ptr<iudp_transport> transport);
 
         expected<void> start();
         void stop();
@@ -335,7 +338,7 @@ namespace vds {
         friend class client_save_stream;
 
         const service_provider * sp_;
-        std::shared_ptr<iudp_transport> udp_transport_;
+        std::list<std::shared_ptr<iudp_transport>> udp_transports_;
         dht_route route_;
         std::map<uint16_t, std::unique_ptr<chunk_generator<uint16_t>>> generators_;
         sync_process sync_process_;

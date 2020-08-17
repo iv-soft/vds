@@ -18,11 +18,12 @@ vds::dht::network::udp_transport::udp_transport(){
 vds::dht::network::udp_transport::~udp_transport() {
 }
 
-vds::async_task<vds::expected<void>> vds::dht::network::udp_transport::start(
+vds::expected<void> vds::dht::network::udp_transport::start(
   const service_provider * sp,
   const std::shared_ptr<asymmetric_public_key> & node_public_key,
   const std::shared_ptr<asymmetric_private_key> & node_key,
-  uint16_t port, bool dev_network) {
+  const network_address & bind_interface,
+  bool dev_network) {
 
   this->MAGIC_LABEL = dev_network ? 0x54445331 : 0x56445331;
 
@@ -32,24 +33,14 @@ vds::async_task<vds::expected<void>> vds::dht::network::udp_transport::start(
   this->node_public_key_ = node_public_key;
   this->node_key_ = node_key;
 
-  auto result = this->server_.start(sp, network_address::any_ip6(port));
-  if(result.has_error()) {
-    result = this->server_.start(sp, network_address::any_ip4(port));
-    if(result.has_error()) {
-      return unexpected(std::move(result.error()));
-    }
-    else {
-      (void)this->server_.socket()->join_membership(AF_INET, "FF02::1");
-    }
-  }
-  else {
-    (void)this->server_.socket()->join_membership(AF_INET6, "FF02::1");
-  }
+  GET_EXPECTED_VALUE(this->writer_, this->server_.start(sp, bind_interface,
+    [pthis = this->shared_from_this()](expected<udp_datagram> datagram_result) {
+      return static_cast<udp_transport *>(pthis.get())->read_handler(std::move(datagram_result));
+    }));
+  sp->get<logger>()->debug("Binding to %s", bind_interface.to_string().c_str());
+  CHECK_EXPECTED(this->server_.socket()->join_membership(bind_interface.family(), "FF02::1"));
 
-  this->reader_ = std::get<0>(result.value());
-  this->writer_ = std::get<1>(result.value());
-
-  return this->continue_read();
+  return expected<void>();
 }
 
 void vds::dht::network::udp_transport::stop() {
@@ -163,7 +154,7 @@ vds::async_task<vds::expected<void>> vds::dht::network::udp_transport::on_timer(
   this->sessions_mutex_.unlock_shared();
 
   for(auto & s : sessions) {
-    CHECK_EXPECTED_ASYNC(co_await s->on_timer(this->shared_from_this()));
+    CHECK_EXPECTED_ASYNC(co_await s->on_timer());
   }
 
   co_return expected<void>();
@@ -182,20 +173,18 @@ void vds::dht::network::udp_transport::get_session_statistics(session_statistic&
 }
 
 
-vds::async_task<vds::expected<void>> vds::dht::network::udp_transport::continue_read() {
-  for (;;) {
-    auto datagram_result = co_await this->reader_->read_async();
+vds::async_task<vds::expected<bool>> vds::dht::network::udp_transport::read_handler(expected<udp_datagram> datagram_result) {
     if(datagram_result.has_error()) {
       if(this->sp_->get_shutdown_event().is_shuting_down()) {
-        co_return expected<void>();
+        co_return false;
       }
-      continue;
+      co_return true;
     }
 
     udp_datagram datagram = std::move(datagram_result.value());
 
     if (this->sp_->get_shutdown_event().is_shuting_down()) {
-      co_return expected<void>();
+      co_return false;
     }
 
     this->sessions_mutex_.lock();
@@ -222,7 +211,7 @@ vds::async_task<vds::expected<void>> vds::dht::network::udp_transport::continue_
           (void)co_await this->write_async(udp_datagram(datagram.address(),
               const_data_buffer(out_message, sizeof(out_message))));
         }
-        continue;
+        co_return true;
       }
     }
 
@@ -232,7 +221,7 @@ vds::async_task<vds::expected<void>> vds::dht::network::udp_transport::continue_
 
       if (session_info.session_) {
         session_info.session_mutex_.unlock();
-        continue;
+        co_return true;
       }
 
       if (
@@ -283,7 +272,8 @@ vds::async_task<vds::expected<void>> vds::dht::network::udp_transport::continue_
           this->this_node_id_,
           std::move(partner_node_public_key),
           partner_node_id,
-          session_info.session_key_);
+          session_info.session_key_,
+          this->shared_from_this());
 
         resizable_data_buffer out_message;
         CHECK_EXPECTED_ASYNC(out_message.add(static_cast<uint8_t>(protocol_message_type_t::Welcome)));
@@ -307,7 +297,7 @@ vds::async_task<vds::expected<void>> vds::dht::network::udp_transport::continue_
       }
       else {
         session_info.session_mutex_.unlock();
-        continue;
+        co_return true;
       }
       break;
     }
@@ -335,7 +325,8 @@ vds::async_task<vds::expected<void>> vds::dht::network::udp_transport::continue_
           this->this_node_id_,
           std::move(public_key),
           partner_id,
-          key);
+          key,
+          this->shared_from_this());
 
         session_info.session_ = session;
         session_info.session_mutex_.unlock();
@@ -370,7 +361,6 @@ vds::async_task<vds::expected<void>> vds::dht::network::udp_transport::continue_
 
         bool failed = false;
         auto result = co_await session->process_datagram(
-          this->shared_from_this(),
           const_data_buffer(datagram.data(), datagram.data_size()));
         if (result.has_error()) {
           logger::get(this->sp_)->debug(ThisModule, "%s at process message from %s",
@@ -409,7 +399,8 @@ vds::async_task<vds::expected<void>> vds::dht::network::udp_transport::continue_
       }
       break;
     }
-    }
   }
+
+  co_return true;
 }
 

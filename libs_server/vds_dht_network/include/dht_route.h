@@ -62,7 +62,7 @@ namespace vds {
           uint8_t hops,
         bool allow_skip);
 
-      vds::async_task<vds::expected<void>> on_timer(std::shared_ptr<network::iudp_transport> transport);
+      vds::async_task<vds::expected<void>> on_timer();
 
       expected<void>  search_nodes(        
         const const_data_buffer &target_id,
@@ -168,8 +168,7 @@ namespace vds {
 
         vds::async_task<vds::expected<void>> on_timer(
             const service_provider * sp,
-            const dht_route* owner,
-            const std::shared_ptr<network::iudp_transport> & transport);
+            const dht_route* owner);
 
         bool contains(const const_data_buffer& node_id) const;
 
@@ -195,7 +194,7 @@ namespace vds {
           std::map<const_data_buffer, std::map<const_data_buffer, std::shared_ptr<node>>> &result_nodes,
         size_t index) const;
 
-      vds::async_task<vds::expected<void>> ping_buckets(std::shared_ptr<network::iudp_transport> transport);
+      vds::async_task<vds::expected<void>> ping_buckets();
     };
   }
 }

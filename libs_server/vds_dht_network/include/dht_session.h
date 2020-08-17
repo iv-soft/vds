@@ -27,14 +27,13 @@ namespace vds {
           const const_data_buffer& this_node_id,
           asymmetric_public_key partner_node_key,
           const const_data_buffer& partner_node_id,
-          const const_data_buffer& session_key) noexcept;
+          const const_data_buffer& session_key,
+          std::shared_ptr<iudp_transport> transport) noexcept;
 
         vds::async_task<vds::expected<void>> ping_node(
-          const const_data_buffer& node_id,
-          const std::shared_ptr<iudp_transport>& transport);
+          const const_data_buffer& node_id);
 
         vds::async_task<vds::expected<bool>> process_message(
-          const std::shared_ptr<iudp_transport>& transport,
           uint8_t message_type,
           const const_data_buffer & target_node,
           const std::vector<const_data_buffer> & hops,

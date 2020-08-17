@@ -56,6 +56,18 @@ std::string vds::network_service::to_string(const sockaddr & from, size_t from_l
   return std::string(hbuf) + ":" + std::string(sbuf);
 }
 
+std::string vds::network_service::to_string(const sockaddr& from, size_t from_len, uint16_t port)
+{
+  char hbuf[NI_MAXHOST], sbuf[NI_MAXSERV];
+
+  getnameinfo(&from, (socklen_t)from_len,
+    hbuf, sizeof hbuf,
+    sbuf, sizeof sbuf,
+    NI_NUMERICHOST | NI_NUMERICSERV);
+
+  return std::string(hbuf) + ":" + std::to_string(port);
+}
+
 std::string vds::network_service::to_string(const sockaddr_in & from)
 {
   return get_ip_address_string(from) + ":" + std::to_string(ntohs(from.sin_port));
@@ -69,6 +81,64 @@ std::string vds::network_service::get_ip_address_string(const sockaddr_in & from
   inet_ntop(from.sin_family, &(from.sin_addr), buffer, len);
 
   return buffer;
+}
+
+vds::expected<std::list<vds::network_address>> vds::network_service::all_network_addresses()
+{
+#ifdef _WIN32
+  ULONG outBufLen = 16 * 1024;
+  std::unique_ptr<IP_ADAPTER_ADDRESSES> pAddresses;
+  for (;;) {
+    pAddresses.reset(reinterpret_cast<IP_ADAPTER_ADDRESSES*>(malloc(outBufLen)));
+    if (!pAddresses) {
+      return make_unexpected<std::bad_alloc>();//Memory allocation failed for IP_ADAPTER_ADDRESSES struct
+    }
+    const auto dwRetVal = GetAdaptersAddresses(AF_UNSPEC, 0, NULL, pAddresses.get(), &outBufLen);
+    if (ERROR_BUFFER_OVERFLOW == dwRetVal) {
+      continue;
+    }
+    if (NO_ERROR == dwRetVal) {
+      break;
+    }
+    
+    return make_unexpected<std::system_error>(dwRetVal, std::system_category(), "GetAdaptersAddresses");
+  }
+
+  std::list<network_address> result;
+  for (auto current = pAddresses.get(); current != nullptr; current = current->Next) {
+    if (IfOperStatusUp == current->OperStatus) {
+      for (auto address = current->FirstUnicastAddress; address != NULL; address = address->Next) {
+        result.push_back(
+          network_address(address->Address.lpSockaddr, address->Address.iSockaddrLength)
+        );
+      }
+    }
+  }
+
+  return result;
+#else//_WIN32
+  struct ifaddrs* ifaddr, * ifa;
+  if (0 > getifaddrs(&ifaddr)) {
+    auto error = errno;
+    return vds::make_unexpected<std::system_error>(error, std::system_category(), "getifaddrs");
+  }
+
+  std::list<network_address> result;
+  for (auto ifa = ifaddr; ifa != NULL; ifa = ifa->ifa_next) {
+    if (ifa->ifa_addr == NULL) {
+      continue;
+    }
+
+    if ((IFF_UP | IFF_BROADCAST) == (ifa->ifa_flags & (IFF_UP | IFF_BROADCAST)) && (ifa->ifa_addr->sa_family == AF_INET || ifa->ifa_addr->sa_family == AF_INET6)) {
+      result.push_back(
+        network_address(ifa->ifa_addr, (ifa->ifa_addr->sa_family == AF_INET) ? sizeof(struct sockaddr_in) : sizeof(struct sockaddr_in6))
+      );
+    }
+  }
+
+  freeifaddrs(ifaddr);
+  return result;
+#endif//_WIN32
 }
 /////////////////////////////////////////////////////////////////////////////
 #define NETWORK_EXIT 0xA1F8

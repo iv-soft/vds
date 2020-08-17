@@ -28,35 +28,63 @@ All rights reserved
 #include "chunk_tmp_data_dbo.h"
 #include "node_storage_dbo.h"
 #include "keys_control.h"
+#include "network_service.h"
 
 vds::dht::network::client::client()
 : is_new_node_(true), port_(0) {
 }
 
 vds::expected<std::shared_ptr<vds::dht::network::_client>> vds::dht::network::_client::create(
-  const service_provider * sp,
-  const std::shared_ptr<iudp_transport> & udp_transport,
-  const std::shared_ptr<asymmetric_public_key> & node_public_key) {
+  const service_provider* sp,
+  const std::shared_ptr<asymmetric_public_key>& node_public_key,
+  const std::shared_ptr<asymmetric_private_key>& node_key,
+  uint16_t port,
+  bool dev_network) {
 
   GET_EXPECTED(this_node_id, node_public_key->fingerprint());
 
-  return std::make_shared<_client>(sp, udp_transport, this_node_id);
+  auto result = std::make_shared<_client>(sp, this_node_id);
+
+  GET_EXPECTED(addresses, network_service::all_network_addresses());
+  if (addresses.empty()) {
+    return make_unexpected<std::runtime_error>("No network interfaces");
+  }
+
+  for (auto & i : addresses) {
+    i.set_port(port);
+    auto transport = std::make_shared<dht::network::udp_transport>();
+
+    auto t = std::make_shared<udp_transport>();
+    CHECK_EXPECTED(
+    t->start(
+      sp,
+      node_public_key,
+      node_key,
+      i,
+      dev_network));
+    result->add_transport(std::move(t));
+
+  }
+
+  return result;
 }
 
 vds::dht::network::_client::_client(
   const service_provider * sp,
-  const std::shared_ptr<iudp_transport> & udp_transport,
   const const_data_buffer & this_node_id)
   : sp_(sp),
   route_(sp, this_node_id),
   update_timer_("DHT Network"),
   update_route_table_counter_(0),
-  udp_transport_(udp_transport),
   sync_process_(sp),
   update_wellknown_connection_enabled_(true) {
   for (uint16_t replica = 0; replica < service::GENERATE_HORCRUX; ++replica) {
     this->generators_[replica].reset(new chunk_generator<uint16_t>(service::MIN_HORCRUX, replica));
   }
+}
+
+void vds::dht::network::_client::add_transport(std::shared_ptr<iudp_transport> transport) {
+  this->udp_transports_.push_back(std::move(transport));
 }
 
 vds::expected<std::vector<vds::const_data_buffer>> vds::dht::network::_client::save_temp(
@@ -158,7 +186,7 @@ vds::async_task<vds::expected<bool>> vds::dht::network::_client::apply_message(
       message_info.session(),
       p.hops_ + message_info.hops().size() + 1,
       true)) {
-      CHECK_EXPECTED_ASYNC(co_await this->udp_transport_->try_handshake(p.address_));
+      CHECK_EXPECTED_ASYNC(co_await message_info.session()->transport()->try_handshake(p.address_));
     }
   }
 
@@ -173,7 +201,6 @@ vds::async_task<vds::expected<bool>> vds::dht::network::_client::apply_message(
   const auto now = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now().time_since_epoch()).count();
   GET_EXPECTED_ASYNC(response, message_create<messages::dht_pong>(message.ping_time_, now));
   CHECK_EXPECTED_ASYNC(co_await message_info.session()->send_message(
-    this->udp_transport_,
     (uint8_t)messages::dht_pong::message_id,
     message_info.source_node(),
     message_serialize(response)));
@@ -257,7 +284,6 @@ vds::async_task<vds::expected<void>> vds::dht::network::_client::send(
     [target_node_id, message_id, msg = std::move(message.value()), pthis = this->shared_from_this()](
     const std::shared_ptr<dht_route::node>& candidate) -> async_task<expected<bool>>{
     CHECK_EXPECTED_ASYNC(co_await candidate->proxy_session_->send_message(
-        pthis->udp_transport_,
         (uint8_t)message_id,
         target_node_id,
         msg));
@@ -280,7 +306,6 @@ vds::async_task<vds::expected<void>> vds::dht::network::_client::send_near(
     [target_node_id, message_id, msg = std::move(message.value()), pthis = this->shared_from_this()](
       const std::shared_ptr<dht_route::node>& candidate)->async_task<expected<bool>>{
       CHECK_EXPECTED_ASYNC(co_await candidate->proxy_session_->send_message(
-        pthis->udp_transport_,
         (uint8_t)message_id,
         candidate->node_id_,
         msg));
@@ -336,7 +361,6 @@ vds::async_task<vds::expected<void>> vds::dht::network::_client::proxy_message(
           candidate->proxy_session_->address().to_string().c_str());
 
         CHECK_EXPECTED_ASYNC(co_await candidate->proxy_session_->proxy_message(
-          pthis->udp_transport_,
           (uint8_t)message_id,
           target_node_id,
           hops,
@@ -354,7 +378,6 @@ vds::async_task<vds::expected<void>> vds::dht::network::_client::send_neighbors(
     [message_id, msg = std::move(message.value()), pthis = this->shared_from_this()](
       const std::shared_ptr<dht_route::node>& candidate)->vds::async_task<vds::expected<bool>> {
     CHECK_EXPECTED_ASYNC(co_await candidate->proxy_session_->send_message(
-        pthis->udp_transport_,
         (uint8_t)message_id,
         candidate->node_id_,
         msg));
@@ -371,10 +394,12 @@ vds::expected<vds::const_data_buffer> vds::dht::network::_client::replica_id(con
 vds::expected<void> vds::dht::network::_client::start() {
   return this->update_timer_.start(this->sp_, std::chrono::seconds(10), [pthis = this->shared_from_this()]() -> async_task<expected<bool>>{
     pthis->sp_->get<logger>()->trace(ThisModule, "Start Udp Transport Timer");
-    CHECK_EXPECTED_ASYNC(co_await pthis->udp_transport_->on_timer());
+    for (auto& t : pthis->udp_transports_) {
+      CHECK_EXPECTED_ASYNC(co_await t->on_timer());
+    }
 
     pthis->sp_->get<logger>()->trace(ThisModule, "Start Route Timer");
-    CHECK_EXPECTED_ASYNC(co_await pthis->route_.on_timer(pthis->udp_transport_));
+    CHECK_EXPECTED_ASYNC(co_await pthis->route_.on_timer());
 
     pthis->sp_->get<logger>()->trace(ThisModule, "Start Route Table Timer");
     CHECK_EXPECTED_ASYNC(co_await pthis->update_route_table());
@@ -689,7 +714,9 @@ void vds::dht::network::_client::get_route_statistics(route_statistic& result) {
 }
 
 void vds::dht::network::_client::get_session_statistics(session_statistic& session_statistic) {
-  static_cast<udp_transport *>(this->udp_transport_.get())->get_session_statistics(session_statistic);
+  for (auto& t : this->udp_transports_) {
+    static_cast<udp_transport*>(t.get())->get_session_statistics(session_statistic);
+  }
 }
 //
 //vds::expected<bool> vds::dht::network::_client::apply_message(
@@ -929,7 +956,9 @@ vds::expected<void> vds::dht::network::_client::update_wellknown_connection(
     WHILE_EXPECTED(st.execute()) {
       auto address = t1.address.get(st);
       final_tasks.push_back([this, address]()->async_task<expected<void>> {
-        (void)co_await this->udp_transport_->try_handshake(address);
+        for (auto& t : this->udp_transports_) {
+          (void)co_await t->try_handshake(address);
+        }
         co_return expected<void>();
       });
     }
@@ -937,13 +966,17 @@ vds::expected<void> vds::dht::network::_client::update_wellknown_connection(
   }
   else {
     final_tasks.push_back([this]()->async_task<expected<void>> {
-      (void)co_await this->udp_transport_->try_handshake("udp://localhost:8050");
+      for (auto& t : this->udp_transports_) {
+        (void)co_await t->try_handshake("udp://localhost:8050");
+      }
       co_return expected<void>();
     });
   }
 
   final_tasks.push_back([this]()->async_task<expected<void>> {
-    (void)this->udp_transport_->broadcast_handshake();
+    for (auto& t : this->udp_transports_) {
+      (void)t->broadcast_handshake();
+    }
     co_return expected<void>();
   });
   return expected<void>();
@@ -999,7 +1032,6 @@ vds::async_task<vds::expected<void>> vds::dht::network::_client::redirect(
     },
     [pthis = this->shared_from_this(), h = std::move(hops), message_id, m = std::move(message)](const std::shared_ptr<dht_route::node> & node) mutable -> vds::async_task<vds::expected<bool>> {
     CHECK_EXPECTED_ASYNC(co_await node->proxy_session_->proxy_message(
-      pthis->udp_transport_,
       (uint8_t)message_id,
       node->node_id_,
       std::move(h),
@@ -1018,21 +1050,12 @@ vds::async_task<vds::expected<void>> vds::dht::network::_client::find_nodes(
 
 vds::expected<void> vds::dht::network::client::start(
   const service_provider * sp,
-  const std::shared_ptr<iudp_transport> & udp_transport,
   uint16_t port,
   bool dev_network) {
 
   this->port_ = port;
   
-  udp_transport->start(
-    sp,
-    this->node_public_key_,
-    this->node_key_,
-    port,
-    dev_network).then([](expected<void> result) {
-  });
-  
-  GET_EXPECTED_VALUE(this->impl_, _client::create(sp, udp_transport, this->node_public_key_));
+  GET_EXPECTED_VALUE(this->impl_, _client::create(sp, this->node_public_key_, this->node_key_, port, dev_network));
   return this->impl_->start();
 }
 

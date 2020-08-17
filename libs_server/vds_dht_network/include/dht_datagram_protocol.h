@@ -37,33 +37,30 @@ namespace vds {
           const const_data_buffer& this_node_id,
           asymmetric_public_key partner_node_key,
           const const_data_buffer& partner_node_id,
-          const const_data_buffer& session_key) noexcept;
+          const const_data_buffer& session_key,
+          std::shared_ptr<iudp_transport> transport) noexcept;
 
         virtual ~dht_datagram_protocol();
 
         void set_mtu(uint16_t value);
 
         vds::async_task<vds::expected<void>> send_message(
-          const std::shared_ptr<iudp_transport>& s,
           uint8_t message_type,
           const const_data_buffer& target_node,
           expected<const_data_buffer>&& message);
 
         vds::async_task<vds::expected<void>> send_message(
-          const std::shared_ptr<iudp_transport>& s,
           uint8_t message_type,
           const const_data_buffer& target_node,
           const const_data_buffer& message);
 
         vds::async_task<vds::expected<void>> proxy_message(
-          std::shared_ptr<iudp_transport> s,
           uint8_t message_type,
           const_data_buffer target_node,
           std::vector<const_data_buffer> hops,
           const_data_buffer message);
 
         vds::async_task<vds::expected<void>> process_datagram(
-          const std::shared_ptr<iudp_transport>& s,
           const_data_buffer datagram);
 
         const network_address& address() const {
@@ -82,15 +79,19 @@ namespace vds {
           return this->partner_node_key_;
         }
 
-        vds::async_task<vds::expected<void>> on_timer(
-          const std::shared_ptr<iudp_transport>& s);
+        vds::async_task<vds::expected<void>> on_timer();
 
         void process_pong(
           const const_data_buffer& source_node,
           uint64_t timeout);
 
+        std::shared_ptr<iudp_transport>& transport() {
+          return this->transport_;
+        }
+
       protected:
         const service_provider * sp_;
+        std::shared_ptr<iudp_transport> transport_;
 
         std::mutex metrics_mutex_;
         time_t last_metric_;
@@ -99,11 +100,9 @@ namespace vds {
         std::mutex traffic_mutex_;
         std::map<const_data_buffer /*from*/, std::map<const_data_buffer /*to*/, std::map<uint8_t /*message_type*/, session_statistic::traffic_info /*size*/>>> traffic_;
 
-        async_task<vds::expected<void>> send_acknowledgment(
-          const std::shared_ptr<iudp_transport>& s);
+        async_task<vds::expected<void>> send_acknowledgment();
 
         virtual vds::async_task<vds::expected<bool>> process_message(
-          const std::shared_ptr<iudp_transport>& transport,
           uint8_t message_type,
           const const_data_buffer& target_node,
           const std::vector<const_data_buffer>& hops,
@@ -117,7 +116,6 @@ namespace vds {
         static constexpr int SEND_TIMEOUT = 600;
 
         struct send_queue_item_t {
-          std::shared_ptr<iudp_transport> transport;
           uint8_t message_type;
           const_data_buffer target_node;
           const_data_buffer source_node;
@@ -158,7 +156,6 @@ namespace vds {
         std::atomic<size_t> service_traffic_ = 0;
 
         vds::async_task<vds::expected<void>> send_message_async(
-          std::shared_ptr<iudp_transport> s,
           uint8_t message_type,
           const_data_buffer target_node,
           std::vector<const_data_buffer> hops,
@@ -170,11 +167,9 @@ namespace vds {
           std::vector<const_data_buffer> hops,
           const_data_buffer message);
 
-        vds::async_task<vds::expected<void>> continue_process_messages(
-          const std::shared_ptr<iudp_transport>& s);
+        vds::async_task<vds::expected<void>> continue_process_messages();
 
         vds::async_task<vds::expected<void>> process_acknowledgment(
-          const std::shared_ptr<iudp_transport>& s,
           const const_data_buffer& datagram);
       };
     }

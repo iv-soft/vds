@@ -27,7 +27,6 @@ namespace vds {
         expected<void> register_services(service_registrator& registrator);
         expected<void> start(
           const service_provider * sp,
-          const std::shared_ptr<iudp_transport> & udp_transport,
           uint16_t port,
           bool dev_network);
         expected<void> stop();

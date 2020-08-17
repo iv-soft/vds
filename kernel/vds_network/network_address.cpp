@@ -256,6 +256,33 @@ uint16_t vds::network_address::port() const {
 }
 
 vds::network_address::network_address(
+  struct sockaddr* ai_addr,
+  size_t ai_addrlen)
+: addr_size_(ai_addrlen) {
+
+  memcpy((char*)&this->addr_, ai_addr, ai_addrlen);
+
+}
+
+void vds::network_address::set_port(uint16_t port) {
+  switch (this->addr_.ss_family) {
+  case AF_INET: {
+    auto addr = (sockaddr_in*)&this->addr_;
+    addr->sin_port = htons(port);
+    break;
+  }
+  case AF_INET6: {
+    auto addr = (sockaddr_in6*)&this->addr_;
+    addr->sin6_port = htons(port);
+    break;
+  }
+  default:
+    vds_assert(false);
+    break;
+  }
+}
+
+vds::network_address::network_address(
   sa_family_t af,
   uint16_t port) {
   memset((char *)&this->addr_, 0, sizeof(this->addr_));

@@ -10,6 +10,7 @@ All rights reserved
 #include "const_data_buffer.h"
 #include "network_address.h"
 #include "socket_base.h"
+#include "network_service.h"
 
 namespace vds {
   class _udp_socket;
@@ -54,10 +55,10 @@ namespace vds {
     _udp_datagram * impl_;
   };
 
-  class udp_datagram_reader : public std::enable_shared_from_this<udp_datagram_reader> {
-  public:
-    vds::async_task<vds::expected<udp_datagram>> read_async();
-  };
+  //class udp_datagram_reader : public std::enable_shared_from_this<udp_datagram_reader> {
+  //public:
+  //  vds::async_task<vds::expected<udp_datagram>> read_async();
+  //};
 
   class udp_datagram_writer : public std::enable_shared_from_this<udp_datagram_writer> {
   public:
@@ -84,10 +85,8 @@ namespace vds {
     udp_socket &operator = (const udp_socket & original) = delete;
     udp_socket & operator = (udp_socket && original);
 
-    std::tuple<
-        std::shared_ptr<udp_datagram_reader>,
-        std::shared_ptr<udp_datagram_writer>>
-          start(const service_provider * sp);
+    expected<std::shared_ptr<udp_datagram_writer>>
+    start(const service_provider * sp, lambda_holder_t<async_task<expected<bool>>, expected<udp_datagram>> read_handler);
 
 #ifndef _WIN32
     void stop() override;
@@ -122,9 +121,10 @@ namespace vds {
     udp_server();
     ~udp_server();
 
-    expected<std::tuple<std::shared_ptr<udp_datagram_reader>, std::shared_ptr<udp_datagram_writer>>> start(
+    expected<std::shared_ptr<udp_datagram_writer>> start(
       const service_provider * sp,
-      const network_address & address);
+      const network_address & address,
+      lambda_holder_t<async_task<expected<bool>>, expected<udp_datagram>> read_handler);
 
     void prepare_to_stop();
     void stop();
@@ -139,24 +139,7 @@ namespace vds {
 
   private:
     _udp_server * impl_;
-  };
-
-  class udp_client
-  {
-  public:
-    udp_client();
-    ~udp_client();
-
-    expected<std::tuple<std::shared_ptr<udp_datagram_reader>, std::shared_ptr<udp_datagram_writer>>> start(
-      const service_provider * sp,
-      sa_family_t af);
-
-    void stop();
-
-  private:
-    _udp_client * impl_;
-  };
-
+  };  
 }
 
 #endif//__VDS_NETWORK_UDP_SOCKET_H_

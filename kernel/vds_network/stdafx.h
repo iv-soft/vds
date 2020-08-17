@@ -14,10 +14,17 @@ All rights reserved
 #ifdef _WIN32
 
 #include <Ws2tcpip.h>
+#include <iphlpapi.h>
+#pragma comment(lib, "IPHLPAPI.lib")
 
 #else
+
 #include <sys/socket.h>
+#include <sys/types.h>
 #include <netdb.h>
+#include <ifaddrs.h>
+#include <net/if.h>
+
 #endif
 
 #endif//__VDS_NETWORK_STDAFX_H_

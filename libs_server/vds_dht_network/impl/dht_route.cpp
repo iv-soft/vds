@@ -73,8 +73,7 @@ void vds::dht::dht_route::bucket::remove_session(const session_type& proxy_sessi
 
 vds::async_task<vds::expected<void>> vds::dht::dht_route::bucket::on_timer(
   const service_provider* sp,
-  const dht_route* owner,
-  const std::shared_ptr<network::iudp_transport> & transport) {
+  const dht_route* owner) {
   std::list<std::tuple<const_data_buffer, session_type>> sessions;
 
   this->nodes_mutex_.lock();
@@ -92,8 +91,7 @@ vds::async_task<vds::expected<void>> vds::dht::dht_route::bucket::on_timer(
 
   for (const auto& s : sessions) {
     CHECK_EXPECTED_ASYNC(co_await std::get<1>(s)->ping_node(
-      std::get<0>(s),
-      transport));
+      std::get<0>(s)));
   }
   co_return expected<void>();
 }
@@ -177,18 +175,18 @@ vds::expected<size_t> vds::dht::dht_route::looking_nodes(const const_data_buffer
   return result;
 }
 
-vds::async_task<vds::expected<void>> vds::dht::dht_route::ping_buckets(std::shared_ptr<network::iudp_transport> transport) {
+vds::async_task<vds::expected<void>> vds::dht::dht_route::ping_buckets() {
   std::shared_lock<std::shared_mutex> lock(this->buckets_mutex_);
   for (auto& p : this->buckets_) {
     logger::get(this->sp_)->trace("DHT", "Bucket %d", p.first);
-    CHECK_EXPECTED_ASYNC(co_await p.second->on_timer(this->sp_, this, transport));
+    CHECK_EXPECTED_ASYNC(co_await p.second->on_timer(this->sp_, this));
   }
 
   co_return expected<void>();
 }
 
-vds::async_task<vds::expected<void>> vds::dht::dht_route::on_timer(std::shared_ptr<network::iudp_transport> transport) {
-  return this->ping_buckets(std::move(transport));
+vds::async_task<vds::expected<void>> vds::dht::dht_route::on_timer() {
+  return this->ping_buckets();
 }
 
 vds::expected<void> vds::dht::dht_route::search_nodes(

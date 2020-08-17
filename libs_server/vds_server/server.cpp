@@ -21,6 +21,7 @@ All rights reserved
 #include "sync_replica_map_dbo.h"
 #include "transaction_log_record_dbo.h"
 #include "local_data_dbo.h"
+#include "network_service.h"
 
 vds::server::server()
 : impl_(new _server(this))
@@ -55,7 +56,7 @@ vds::expected<void> vds::server::stop()
 vds::async_task<vds::expected<void>> vds::server::start_network(
   uint16_t port,
   bool dev_network) {
-  CHECK_EXPECTED_ASYNC(this->impl_->dht_network_service_->start(this->impl_->sp_, this->impl_->udp_transport_, port, dev_network));
+  CHECK_EXPECTED_ASYNC(this->impl_->dht_network_service_->start(this->impl_->sp_, port, dev_network));
   co_return expected<void>();
 }
 
@@ -71,7 +72,6 @@ vds::async_task<vds::expected<vds::server_statistic>> vds::server::get_statistic
 vds::_server::_server(server * owner)
 : owner_(owner),
   db_model_(new db_model()),
-  udp_transport_(new dht::network::udp_transport()),
   dht_network_service_(new dht::network::service()),
   update_timer_("Log Sync") {
 }
@@ -108,14 +108,12 @@ vds::expected<void> vds::_server::stop()
 {
   CHECK_EXPECTED(this->dht_network_service_->stop());
   CHECK_EXPECTED(this->db_model_->stop());
-  this->udp_transport_.reset();
   this->db_model_.reset();
 
   return expected<void>();
 }
 
 vds::async_task<vds::expected<void>> vds::_server::prepare_to_stop() {
-  this->udp_transport_->stop();
   CHECK_EXPECTED_ASYNC(co_await this->dht_network_service_->prepare_to_stop());
   CHECK_EXPECTED_ASYNC(co_await this->db_model_->prepare_to_stop());
   co_return expected<void>();

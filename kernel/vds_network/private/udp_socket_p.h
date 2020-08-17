@@ -93,14 +93,13 @@ namespace vds {
     }
 
 #ifndef _WIN32
-    std::tuple<
-        std::shared_ptr<vds::udp_datagram_reader>,
-            std::shared_ptr<vds::udp_datagram_writer>>
+    expected<std::shared_ptr<vds::udp_datagram_writer>>
     start(
         const service_provider * sp,
-        const std::shared_ptr<socket_base> & owner);
+        const std::shared_ptr<socket_base> & owner,
+        lambda_holder_t<async_task<expected<bool>>, expected<udp_datagram>> read_handler);
 
-        expected<void> process(uint32_t events);
+    expected<void> process(uint32_t events);
 
     expected<void>  change_mask(
         const std::shared_ptr<socket_base> & owner,
@@ -164,27 +163,22 @@ namespace vds {
   };
 
 #ifdef _WIN32
-  class _udp_receive : public _socket_task, public udp_datagram_reader
+  class _udp_receive : public _socket_task
   {
   public:
     _udp_receive(
         const service_provider * sp,
-        const std::shared_ptr<udp_socket> & s)
-      : sp_(sp), s_(s)
-    {
+        const std::shared_ptr<udp_socket> & s,
+        lambda_holder_t<async_task<expected<bool>>, expected<udp_datagram>> read_handler)
+      : sp_(sp), s_(s), read_handler_(std::move(read_handler)) {
     }
 
-    vds::async_task<vds::expected<udp_datagram>> read_async()
+    void schedule_read()
     {
-      vds_assert(!this->result_);
-
       memset(&this->overlapped_, 0, sizeof(this->overlapped_));
       this->wsa_buf_.len = sizeof(this->buffer_);
       this->wsa_buf_.buf = (CHAR *)this->buffer_;
       this->addr_.clear();
-
-      auto r = std::make_shared<vds::async_result<vds::expected<udp_datagram>>>();
-      this->result_ = r;
 
       this->sp_->get<logger>()->trace("UDP", "WSARecvFrom %d", (*this->s_)->handle());
 
@@ -202,12 +196,11 @@ namespace vds {
         NULL)) {
         auto errorCode = WSAGetLastError();
         if (WSA_IO_PENDING != errorCode) {
-          this->result_.reset();
-          r->set_value(
+          this->read_handler_(
             make_unexpected<std::system_error>(
-                errorCode,
-                std::system_category(),
-                "WSARecvFrom failed"));
+              errorCode,
+              std::system_category(),
+              "WSARecvFrom failed")).then([this](expected<bool>) { delete this; });
         }
         else {
           this->sp_->get<logger>()->trace("UDP", "Read scheduled");
@@ -218,8 +211,6 @@ namespace vds {
         this->sp_->get<logger>()->trace("UDP", "Direct readed %d, code %d", numberOfBytesRecvd, errorCode);
         //this_->process(numberOfBytesRecvd);
       }
-
-      return r->get_future();
     }
 
     void prepare_to_stop()
@@ -229,7 +220,7 @@ namespace vds {
   private:
     const service_provider * sp_;
     std::shared_ptr<udp_socket> s_;
-    std::shared_ptr<vds::async_result<vds::expected<udp_datagram>>> result_;
+    lambda_holder_t<async_task<expected<bool>>, expected<udp_datagram>> read_handler_;
 
     network_address addr_;
     uint8_t buffer_[64 * 1024];
@@ -238,18 +229,29 @@ namespace vds {
     {
       this->sp_->get<logger>()->trace("UDP", "Got %d bytes UDP package from %s", dwBytesTransfered, this->addr_.to_string().c_str());
 
-      vds_assert(this->result_);
-      auto pthis = this->shared_from_this();
-      auto r = std::move(this->result_);
-      r->set_value(_udp_datagram::create(this->addr_, this->buffer_, (size_t)dwBytesTransfered));
+      this->read_handler_(_udp_datagram::create(this->addr_, this->buffer_, (size_t)dwBytesTransfered)).then(
+        [this](expected<bool> result) {
+          if (!result.has_error() && result.value()) {
+            this->schedule_read();
+          }
+          else {
+            delete this;
+          }});
     }
 
     void error(DWORD error_code) override
     {
       this->sp_->get<logger>()->trace("UDP", "Error %d at get recive UDP package", error_code);
 
-      auto r = std::move(this->result_);
-      r->set_value(make_unexpected<std::system_error>(error_code, std::system_category(), "WSARecvFrom failed"));
+      this->read_handler_(make_unexpected<std::system_error>(error_code, std::system_category(), "WSARecvFrom failed"))
+      .then(
+        [this](expected<bool> result) {
+          if (!result.has_error() && result.value()) {
+            this->schedule_read();
+          }
+          else {
+            delete this;
+          }});
     }
   };
 
@@ -359,14 +361,16 @@ namespace vds {
   };
 
 #else
-  class _udp_receive : public udp_datagram_reader
+  class _udp_receive : public std::enable_shared_from_this< _udp_receive>
   {
   public:
     _udp_receive(
         const service_provider * sp,
-        const std::shared_ptr<socket_base> & owner)
+        const std::shared_ptr<socket_base> & owner,
+        lambda_holder_t<async_task<expected<bool>>, expected<udp_datagram>> read_handler)
       : sp_(sp),
-        owner_(owner)
+        owner_(owner),
+        read_handler_(std::move(read_handler))
     {
     }
 
@@ -374,9 +378,7 @@ namespace vds {
     {
     }
 
-    vds::async_task<vds::expected<udp_datagram>> read_async() {
-      auto r = std::make_shared<vds::async_result<vds::expected<udp_datagram>>>();
-
+    vds::expected<void> schedule_read() {
       this->addr_.reset();
       int len = recvfrom((*this->owner())->handle(),
                          this->read_buffer_,
@@ -388,20 +390,29 @@ namespace vds {
       if (len <= 0) {
         int error = errno;
         if (EAGAIN == error) {
-          this->read_result_ = r;
           CHECK_EXPECTED((*this->owner())->change_mask(this->owner_, EPOLLIN));
         }
         else {
           this->sp_->get<logger>()->trace("UDP", "Error %d at get recive UDP package", error);
-          r->set_value(make_unexpected<std::system_error>(error, std::system_category(), "recvfrom"));
+          this->read_handler_(make_unexpected<std::system_error>(error, std::system_category(), "recvfrom"))
+            .then([pthis = this->shared_from_this()](expected<bool> result){
+            if (!result.has_error() && result.value()) {
+              (void)static_cast<_udp_receive *>(pthis.get())->schedule_read();
+            }
+          });
         }
       }
       else {
         this->sp_->get<logger>()->trace("UDP", "Got %d bytes UDP package from %s", len, this->addr_.to_string().c_str());
-        r->set_value(_udp_datagram::create(this->addr_, this->read_buffer_, len));
+        this->read_handler_(_udp_datagram::create(this->addr_, this->read_buffer_, len))
+          .then([pthis = this->shared_from_this()](expected<bool> result){
+          if (!result.has_error() && result.value()) {
+            (void)static_cast<_udp_receive*>(pthis.get())->schedule_read();
+          }
+        });
       }
 
-      return r->get_future();
+      return expected<void>();
     }
 
 
@@ -414,7 +425,6 @@ namespace vds {
                          this->addr_,
                          this->addr_.size_ptr());
 
-      auto r = std::move(this->read_result_);
       if (len <= 0) {
         int error = errno;
         if (EAGAIN == error) {
@@ -423,8 +433,12 @@ namespace vds {
 
         CHECK_EXPECTED((*this->owner())->change_mask(this->owner_, 0, EPOLLIN));
         this->sp_->get<logger>()->trace("UDP", "Error %d at get recive UDP package", error);
-        r->set_value(
-          make_unexpected<std::system_error>(error, std::system_category(), "recvfrom"));
+        this->read_handler_(make_unexpected<std::system_error>(error, std::system_category(), "recvfrom"))
+          .then([pthis = this->shared_from_this()](expected<bool> result){
+          if (!result.has_error() && result.value()) {
+            (void)pthis->schedule_read();
+          }
+        });
       }
       else {
         this->sp_->get<logger>()->trace(
@@ -434,7 +448,12 @@ namespace vds {
             this->addr_.to_string().c_str());
 
           CHECK_EXPECTED((*this->owner())->change_mask(this->owner_, 0, EPOLLIN));
-        r->set_value(_udp_datagram::create(this->addr_, this->read_buffer_, len));
+          this->read_handler_(_udp_datagram::create(this->addr_, this->read_buffer_, len))
+            .then([pthis = this->shared_from_this()](expected<bool> result){
+            if (!result.has_error() && result.value()) {
+              (void)pthis->schedule_read();
+            }
+          });
       }
       return expected<void>();
     }
@@ -443,7 +462,7 @@ namespace vds {
   private:
     const service_provider * sp_;
     std::shared_ptr<socket_base> owner_;
-    std::shared_ptr<vds::async_result<vds::expected<udp_datagram>>> read_result_;
+    lambda_holder_t<async_task<expected<bool>>, expected<udp_datagram>> read_handler_;
 
     network_address addr_;
     uint8_t read_buffer_[64 * 1024];
@@ -585,7 +604,9 @@ namespace vds {
     {
     }
 
-    expected<std::tuple<std::shared_ptr<udp_datagram_reader>, std::shared_ptr<udp_datagram_writer>>> start(const service_provider * sp)
+    expected<std::shared_ptr<udp_datagram_writer>> start(
+      const service_provider * sp,
+      lambda_holder_t<async_task<expected<bool>>, expected<udp_datagram>> read_handler)
     {
       GET_EXPECTED_VALUE(this->socket_, udp_socket::create(sp, this->address_.family()));
 
@@ -595,10 +616,10 @@ namespace vds {
 #else
         auto error = errno;
 #endif
-        return vds::make_unexpected<std::system_error>(error, std::system_category(), "bind socket");
+        return vds::make_unexpected<std::system_error>(error, std::system_category(), "bind socket " + this->address_.to_string());
       }
 
-      return this->socket_->start(sp);
+      return this->socket_->start(sp, std::move(read_handler));
     }
 
     void prepare_to_stop()
@@ -620,32 +641,6 @@ namespace vds {
     network_address address_;
   };
 
-
-  class _udp_client
-  {
-  public:
-    _udp_client()
-    {
-
-    }
-
-    ~_udp_client()
-    {
-
-    }
-
-    expected<std::tuple<std::shared_ptr<udp_datagram_reader>, std::shared_ptr<udp_datagram_writer>>>
-      start(const service_provider * sp, sa_family_t af)
-    {
-      GET_EXPECTED_VALUE(this->socket_, udp_socket::create(sp, af));
-      return this->socket_->start(sp);
-    }
-
-
-  private:
-    std::shared_ptr<udp_socket> socket_;
-
-  };
 }
 
 #endif//__VDS_NETWORK_UDP_SOCKET_P_H_

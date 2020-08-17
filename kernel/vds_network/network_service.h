@@ -7,6 +7,7 @@ All rights reserved
 */
 
 #include "service_provider.h"
+#include "network_address.h"
 
 namespace vds {
     class _network_service;
@@ -24,8 +25,11 @@ namespace vds {
       vds::async_task<vds::expected<void>> prepare_to_stop() override;
       
       static std::string to_string(const struct sockaddr & from, size_t from_len);
+      static std::string to_string(const struct sockaddr& from, size_t from_len, uint16_t port);
       static std::string to_string(const struct sockaddr_in & from);
       static std::string get_ip_address_string(const sockaddr_in & from);
+
+      static expected<std::list<network_address>> all_network_addresses();
       
       _network_service * operator -> () const {
         return this->impl_.get();
