@@ -34,10 +34,15 @@ vds::async_task<vds::expected<void>> vds::websocket_api::process_api_message(
   vds::const_data_buffer data) {
   GET_EXPECTED_ASYNC(message, vds::json_parser::parse("Web Socket API", data));
 
+  GET_EXPECTED_ASYNC(message_input, message->str());
+  sp->get<logger>()->debug(ThisModule, "API call '%s'", message_input.c_str());
+
   std::list<vds::lambda_holder_t<vds::async_task<vds::expected<void>>>> post_tasks;
   GET_EXPECTED_ASYNC(result, co_await api->process_message(sp, output_stream, message, post_tasks));
 
   GET_EXPECTED_ASYNC(result_str, result->str());
+  sp->get<logger>()->debug(ThisModule, "API call result '%s'", result_str.c_str());
+
   GET_EXPECTED_ASYNC(stream, co_await output_stream->start(result_str.length(), false));
   CHECK_EXPECTED_ASYNC(co_await stream->write_async((const uint8_t*)result_str.c_str(), result_str.length()));
 
@@ -186,7 +191,7 @@ vds::websocket_api::process_message(
       object_ids.push_back(obj_id);
     }
 
-    CHECK_EXPECTED_ASYNC(co_await this->download(sp, r, object_ids));
+    CHECK_EXPECTED_ASYNC(co_await this->prepare_download(sp, r, object_ids));
   }
   else if ("download" == method_name) {
     auto args = std::dynamic_pointer_cast<json_array>(request->get_property("params"));
