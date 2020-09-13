@@ -957,7 +957,15 @@ vds::expected<void> vds::dht::network::_client::update_wellknown_connection(
       auto address = t1.address.get(st);
       final_tasks.push_back([this, address]()->async_task<expected<void>> {
         for (auto& t : this->udp_transports_) {
-          (void)co_await t->try_handshake(address);
+          auto sp = this->sp_;
+          t->try_handshake(address).then([address, sp](expected<void> result) {
+            if (result.has_error()) {
+              sp->get<logger>()->error(ThisModule, "%s at update_wellknown_connection %s", result.error()->what(), address.c_str());
+            }
+            else {
+              sp->get<logger>()->trace(ThisModule, "update_wellknown_connection %s successful", address.c_str());
+            }
+          });
         }
         co_return expected<void>();
       });
@@ -967,7 +975,15 @@ vds::expected<void> vds::dht::network::_client::update_wellknown_connection(
   else {
     final_tasks.push_back([this]()->async_task<expected<void>> {
       for (auto& t : this->udp_transports_) {
-        (void)co_await t->try_handshake("udp://localhost:8050");
+        auto sp = this->sp_;
+        t->try_handshake("udp://localhost:8050").then([sp](expected<void> result) {
+          if (result.has_error()) {
+            sp->get<logger>()->error(ThisModule, "%s at update_wellknown_connection udp://localhost:8050", result.error()->what());
+          }
+          else {
+            sp->get<logger>()->trace(ThisModule, "update_wellknown_connection udp://localhost:8050 successful");
+          }
+        });
       }
       co_return expected<void>();
     });

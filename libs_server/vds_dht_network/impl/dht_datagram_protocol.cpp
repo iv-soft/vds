@@ -321,7 +321,16 @@ vds::async_task<vds::expected<void>> vds::dht::network::dht_datagram_protocol::s
 
   for (uint32_t start_index = std::get<0>(indexes); start_index < std::get<1>(indexes); ++start_index) {
     std::unique_lock<std::mutex> lock(this->output_mutex_);
-    auto p = this->output_messages_.find(start_index);
+    auto p = this->output_messages_.begin();
+    if (this->output_messages_.end() == p) {
+      break;
+    }
+
+    if (p->first + 64 < start_index) {
+      break;//avoid traffic jam
+    }
+
+    p = this->output_messages_.find(start_index);
     if (this->output_messages_.end() == p) {
       continue;
     }
