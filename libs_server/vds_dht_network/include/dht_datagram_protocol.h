@@ -142,12 +142,20 @@ namespace vds {
           const_data_buffer data_;
         };
         std::map<uint32_t, output_message> output_messages_;
+        struct prepared_message_t {
+          uint8_t message_type_;
+          const_data_buffer target_node_;
+          const_data_buffer message_;
+        };
+        std::map<uint32_t, prepared_message_t> prepared_messages_;
 
         std::mutex input_mutex_;
-        uint32_t last_input_index_;
-        uint32_t expected_index_;
+        uint32_t last_input_index_;//Got last_input_index_ and previouse messages
+        uint32_t expected_index_;//Next message to process
         std::chrono::steady_clock::time_point last_processed_;
         std::map<uint32_t, const_data_buffer> input_messages_;
+
+        uint32_t last_acknowledgment_index_;
 
         std::atomic<uint64_t> idle_time_ = 0;
         std::atomic<size_t> idle_count_ = 0;

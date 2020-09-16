@@ -267,6 +267,7 @@ vds::async_task<vds::expected<void>> vds::dht::network::dht_datagram_protocol::s
   CHECK_EXPECTED(out_message.add((uint8_t)protocol_message_type_t::Acknowledgment));
 
   std::unique_lock<std::mutex> lock(this->input_mutex_);
+  this->last_acknowledgment_index_ = this->last_input_index_;
   CHECK_EXPECTED(out_message.add((uint8_t)((this->last_input_index_) >> 24)));//1
   CHECK_EXPECTED(out_message.add((uint8_t)((this->last_input_index_) >> 16)));//1
   CHECK_EXPECTED(out_message.add((uint8_t)((this->last_input_index_) >> 8)));//1
@@ -312,7 +313,16 @@ vds::async_task<vds::expected<void>> vds::dht::network::dht_datagram_protocol::s
   const_data_buffer target_node,
   std::vector<const_data_buffer> hops,
   const_data_buffer message) {
-
+    {
+      std::unique_lock<std::mutex> lock(this->output_mutex_);
+      for (const auto& prepared : this->prepared_messages_) {
+        if (prepared.second.message_type_ == message_type
+          && prepared.second.target_node_ == target_node
+          && prepared.second.message_ == message) {
+          co_return expected<void>();
+        }
+      }
+    }
   GET_EXPECTED_ASYNC(indexes, this->prepare_to_send(
     message_type,
     std::move(target_node),
@@ -351,6 +361,7 @@ vds::expected<std::tuple<uint32_t, uint32_t>> vds::dht::network::dht_datagram_pr
 
   std::unique_lock<std::mutex> lock(this->output_mutex_);
   uint32_t start_index = this->last_output_index_;
+  this->prepared_messages_.emplace(start_index, prepared_message_t{ message_type, target_node, message });
 
   size_t total_size = 1 + 4 + 32 + message.size();
   if (hops.empty()) {
@@ -555,6 +566,10 @@ vds::expected<std::tuple<uint32_t, uint32_t>> vds::dht::network::dht_datagram_pr
 vds::async_task<vds::expected<void>> vds::dht::network::dht_datagram_protocol::continue_process_messages() {
 
   for (;;) {
+    if (this->last_acknowledgment_index_ + 32 < this->last_input_index_) {
+      CHECK_EXPECTED_ASYNC(co_await this->send_acknowledgment());
+    }
+
     std::unique_lock<std::mutex> lock(this->input_mutex_);
 
     while (this->input_messages_.end() != this->input_messages_.find(this->last_input_index_)) {
@@ -806,6 +821,20 @@ vds::async_task<vds::expected<void>> vds::dht::network::dht_datagram_protocol::p
 
       this->output_messages_.erase(p);
       this->last_sent_ = 0;
+    }
+    else {
+      break;
+    }
+  }
+
+  for (;;) {
+    auto p = this->prepared_messages_.begin();
+    if (this->prepared_messages_.end() == p) {
+      break;
+    }
+
+    if (p->first < last_index) {
+      this->prepared_messages_.erase(p);
     }
     else {
       break;
