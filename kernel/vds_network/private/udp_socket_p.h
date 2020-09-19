@@ -437,6 +437,10 @@ namespace vds {
           .then([pthis = this->shared_from_this()](expected<bool> result){
           if (!result.has_error() && result.value()) {
             (void)pthis->schedule_read();
+          } else if (result.has_error()) {
+            pthis->sp_->get<logger>()->trace("UDP", "Error %s at process UDP package", result.error()->what());
+          } else {
+            pthis->sp_->get<logger>()->trace("UDP", "Terminated process UDP package");
           }
         });
       }
@@ -452,6 +456,10 @@ namespace vds {
             .then([pthis = this->shared_from_this()](expected<bool> result){
             if (!result.has_error() && result.value()) {
               (void)pthis->schedule_read();
+            } else if (result.has_error()) {
+              pthis->sp_->get<logger>()->trace("UDP", "Error %s at process UDP package", result.error()->what());
+            } else {
+              pthis->sp_->get<logger>()->trace("UDP", "Terminated process UDP package");
             }
           });
       }
