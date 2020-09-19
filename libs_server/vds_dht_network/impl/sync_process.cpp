@@ -191,6 +191,13 @@ vds::expected<bool> vds::dht::network::sync_process::apply_message(
             replica));
       });
   }
+  else {
+    this->sp_->get<logger>()->debug(
+      SyncModule,
+      "Not found replica %s requested by %s",
+      base64::from_bytes(message.object_id).c_str(),
+      base64::from_bytes(message_info.source_node()).c_str());
+  }
 
   return true;
 }
