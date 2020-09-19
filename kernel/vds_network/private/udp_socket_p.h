@@ -156,7 +156,7 @@ namespace vds {
     std::mutex event_masks_mutex_;
     uint32_t event_masks_;
 
-    std::weak_ptr<class _udp_receive> read_task_;
+    std::shared_ptr<class _udp_receive> read_task_;
     std::weak_ptr<class _udp_send> write_task_;
 
 #endif

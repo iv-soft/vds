@@ -308,10 +308,7 @@ vds::expected<void> vds::_udp_socket::process(uint32_t events) {
       return vds::make_unexpected<std::runtime_error>("Invalid state");
     }
 
-    auto r = this->read_task_.lock();
-    if(r){
-      CHECK_EXPECTED(r->process());
-    }
+    CHECK_EXPECTED(this->read_task_->process());
   }
   return expected<void>();
 }
