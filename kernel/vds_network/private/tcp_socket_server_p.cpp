@@ -134,7 +134,7 @@ vds::expected<void> vds::_tcp_socket_server::start(
   }
 
   //bind to address
-  sp->get<logger>()->trace(ThisModule, "Starting UDP server on %s", address.to_string().c_str());
+  sp->get<logger>()->trace(ThisModule, "Starting TCP server on %s", address.to_string().c_str());
   if (0 > ::bind(this->s_, address, address.size())) {
     auto error = errno;
     return vds::make_unexpected<std::system_error>(error, std::system_category());

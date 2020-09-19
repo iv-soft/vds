@@ -151,7 +151,7 @@ vds::expected<void> vds::_tcp_socket_server::start(
   }
 
   //bind to address
-  sp->get<logger>()->trace("UDP", "Starting UDP server on %s", address.to_string().c_str());
+  sp->get<logger>()->trace("TCP", "Starting TCP server on %s", address.to_string().c_str());
   if (0 > ::bind(this->s_, address, address.size())) {
     auto error = errno;
     return vds::make_unexpected<std::system_error>(error, std::generic_category());
@@ -181,7 +181,7 @@ vds::expected<void> vds::_tcp_socket_server::start(
     [this, sp, ch = std::move(new_connection)]() {
     auto epollfd = epoll_create(1);
     if (0 > epollfd) {
-      sp->get<logger>()->error("UDP", "epoll_create failed");
+      sp->get<logger>()->error("TCP", "epoll_create failed");
       return;
     }
 
@@ -190,7 +190,7 @@ vds::expected<void> vds::_tcp_socket_server::start(
     ev.events = EPOLLIN;
     ev.data.fd = this->s_;
     if (0 > epoll_ctl(epollfd, EPOLL_CTL_ADD, this->s_, &ev)) {
-      sp->get<logger>()->error("UDP", "epoll_create failed");
+      sp->get<logger>()->error("TCP", "epoll_create failed");
       return;
     }
 
