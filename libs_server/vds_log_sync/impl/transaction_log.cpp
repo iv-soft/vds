@@ -129,7 +129,7 @@ vds::expected<void> vds::transactions::transaction_log::process_block_with_follo
       GET_EXPECTED_VALUE(st, t.get_reader(t1.select(t1.data, t1.state, t1.consensus).where(t1.id == p)));
       GET_EXPECTED(st_execute_result, st.execute());
       if (!st_execute_result) {
-        return vds::make_unexpected<std::runtime_error>("Invalid data");
+        return vds::make_unexpected<std::runtime_error>("Invalid data in transaction_log_record_dbo");
       }
 
       if (result == orm::transaction_log_record_dbo::state_t::leaf) {
@@ -299,7 +299,7 @@ vds::expected<void> vds::transactions::transaction_log::process_followers(const 
       GET_EXPECTED_VALUE(st, t.get_reader(t1.select(t1.data, t1.state, t1.consensus).where(t1.id == p)));
       GET_EXPECTED(st_execute_result, st.execute());
       if (!st_execute_result) {
-        return vds::make_unexpected<std::runtime_error>("Invalid data");
+        return vds::make_unexpected<std::runtime_error>("Invalid data in transaction_log_record_dbo");
       }
 
       if (result == orm::transaction_log_record_dbo::state_t::leaf) {
@@ -354,7 +354,7 @@ vds::expected<bool> vds::transactions::transaction_log::update_consensus(
         is_new = true;
       }
       else {
-        return vds::make_unexpected<std::runtime_error>("Invalid data");
+        return vds::make_unexpected<std::runtime_error>("Invalid data in transaction_log_vote_request_dbo");
       }
     }
     else {
@@ -389,7 +389,7 @@ vds::expected<bool> vds::transactions::transaction_log::update_consensus(
         GET_EXPECTED(st, t.get_reader(t1.select(t1.state, t1.data, t1.consensus).where(t1.id == ancestor)));
         GET_EXPECTED(st_execute, st.execute());
         if (!st_execute) {
-          return vds::make_unexpected<std::runtime_error>("Invalid data");
+          return vds::make_unexpected<std::runtime_error>("Invalid data in transaction_log_record_dbo(ancestor)");
         }
 
         not_processed[ancestor] = std::make_tuple(t1.data.get(st), t1.state.get(st), t1.consensus.get(st));
@@ -458,7 +458,7 @@ vds::expected<bool> vds::transactions::transaction_log::update_consensus(
     GET_EXPECTED(st, t.get_reader(t1.select(t1.state, t1.data, t1.consensus).where(t1.id == p)));
     GET_EXPECTED(st_execute, st.execute());
     if (!st_execute) {
-      return vds::make_unexpected<std::runtime_error>("Invalid data");
+      return vds::make_unexpected<std::runtime_error>("Invalid data in transaction_log_record_dbo(id)");
     }
     if (orm::transaction_log_record_dbo::state_t::validated != t1.state.get(st)) {
       continue;
@@ -508,11 +508,11 @@ vds::expected<void> vds::transactions::transaction_log::rollback_all(const servi
           .where(t1.id == ancestor)));
       GET_EXPECTED(st_result, st.execute());
       if (!st_result) {
-        return vds::make_unexpected<std::runtime_error>("Invalid data");
+        return vds::make_unexpected<std::runtime_error>("Invalid data in transaction_log_record_dbo(ancestor)");
       }
 
       if(orm::transaction_log_record_dbo::state_t::processed != t1.state.get(st)) {
-        return vds::make_unexpected<std::runtime_error>("Invalid data");
+        return vds::make_unexpected<std::runtime_error>("Invalid data in transaction_log_record_dbo(state)");
       }
 
       if (t1.order_no.get(st) < min_order || t1.consensus.get(st)) {
@@ -728,7 +728,7 @@ vds::expected<void> vds::transactions::transaction_log::invalid_block(
       || t1.state.get(st) == orm::transaction_log_record_dbo::state_t::leaf
       || t1.state.get(st) == orm::transaction_log_record_dbo::state_t::processed
       || t1.consensus.get(st)) {
-      return vds::make_unexpected<std::runtime_error>("Invalid data");
+      return vds::make_unexpected<std::runtime_error>("Invalid data at transaction_log_record_dbo(followers state)");
     }
 
     CHECK_EXPECTED(invalid_block(sp, t, p, value));
@@ -749,7 +749,7 @@ vds::expected<bool> vds::transactions::transaction_log::check_consensus(
     .where(t2.id == log_id && t2.new_member == false)));
   GET_EXPECTED(st_execute, st.execute());
   if (!st_execute) {
-    return vds::make_unexpected<std::runtime_error>("Invalid data");
+    return vds::make_unexpected<std::runtime_error>("Invalid data at vds::transactions::transaction_log::check_consensus");
   }
 
   const auto tc = total_count.get(st);
@@ -763,7 +763,7 @@ vds::expected<bool> vds::transactions::transaction_log::check_consensus(
     .where(t2.id == log_id && t2.approved == true && t2.new_member == false)));
   GET_EXPECTED_VALUE(st_execute, st.execute());
   if (!st_execute) {
-    return vds::make_unexpected<std::runtime_error>("Invalid data");
+    return vds::make_unexpected<std::runtime_error>("Invalid data at vds::transactions::transaction_log::check_consensus(appoved_count)");
   }
 
   auto ac = appoved_count.get(st);

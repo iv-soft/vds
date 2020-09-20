@@ -181,7 +181,7 @@ vds::async_task<vds::expected<void>> vds::http_parser::write_async(
 
     case StateEnum::STATE_PARSE_FINISH_CHUNK: {
       if ('\r' != *data) {
-        co_return vds::make_unexpected<std::runtime_error>("Invalid data");
+        co_return vds::make_unexpected<std::runtime_error>("Invalid data at parse chunk");
       }
 
       ++data;
@@ -192,7 +192,7 @@ vds::async_task<vds::expected<void>> vds::http_parser::write_async(
 
     case StateEnum::STATE_PARSE_FINISH_CHUNK1: {
       if ('\n' != *data) {
-        co_return vds::make_unexpected<std::runtime_error>("Invalid data");
+        co_return vds::make_unexpected<std::runtime_error>("Invalid data at finish chunk");
       }
 
       ++data;
