@@ -81,13 +81,13 @@ vds::expected<vds::symmetric_key> vds::symmetric_key::deserialize(
   std::unique_ptr<unsigned char> key(new unsigned char[crypto_info.key_size()]);
   GET_EXPECTED(key_size, s.pop_data(key.get(), (int)crypto_info.key_size()));
   if (crypto_info.key_size() != key_size) {
-    return vds::make_unexpected<std::runtime_error>("Invalid data");
+    return vds::make_unexpected<std::runtime_error>("Invalid data at vds::symmetric_key::deserialize key");
   }
 
   std::unique_ptr<unsigned char> iv(new unsigned char[crypto_info.iv_size()]);
   GET_EXPECTED(iv_size, s.pop_data(iv.get(), (int)crypto_info.iv_size()));
   if(crypto_info.iv_size() != iv_size){
-    return vds::make_unexpected<std::runtime_error>("Invalid data");
+    return vds::make_unexpected<std::runtime_error>("Invalid data at vds::symmetric_key::deserialize iv");
   }
 
   return symmetric_key(new _symmetric_key(crypto_info, key.release(), iv.release()));

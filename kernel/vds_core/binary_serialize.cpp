@@ -97,7 +97,7 @@ vds::binary_deserializer::binary_deserializer(const void* data, size_t len)
 
 vds::expected<void> vds::binary_deserializer::get(bool& value) {
   if (1 > this->len_) {
-    return vds::make_unexpected<std::runtime_error>("Invalid data");
+    return vds::make_unexpected<std::runtime_error>("Invalid data at vds::binary_deserializer::get(bool)");
   }
 
   value = (0 != *this->data_++);
@@ -109,7 +109,7 @@ vds::expected<void> vds::binary_deserializer::get(bool& value) {
 vds::expected<void> vds::binary_deserializer::get(uint8_t & value)
 {
   if(1 > this->len_){
-    return vds::make_unexpected<std::runtime_error>("Invalid data");
+    return vds::make_unexpected<std::runtime_error>("Invalid data at vds::binary_deserializer::get(uint8_t)");
   }
   
   value = *this->data_++;
@@ -121,7 +121,7 @@ vds::expected<void> vds::binary_deserializer::get(uint8_t & value)
 vds::expected<void> vds::binary_deserializer::get(uint16_t& value)
 {
   if(2 > this->len_){
-    return vds::make_unexpected<std::runtime_error>("Invalid data");
+    return vds::make_unexpected<std::runtime_error>("Invalid data at vds::binary_deserializer::get(uint16_t)");
   }
   
   value = *this->data_++;
@@ -136,7 +136,7 @@ vds::expected<void> vds::binary_deserializer::get(uint16_t& value)
 vds::expected<void> vds::binary_deserializer::get(uint32_t& value)
 {
   if(4 > this->len_){
-    return vds::make_unexpected<std::runtime_error>("Invalid data");
+    return vds::make_unexpected<std::runtime_error>("Invalid data at vds::binary_deserializer::get(uint32_t)");
   }
   
   value = *this->data_++;
@@ -155,7 +155,7 @@ vds::expected<void> vds::binary_deserializer::get(uint32_t& value)
 vds::expected<void> vds::binary_deserializer::get(uint64_t& value)
 {
   if(8 > this->len_){
-    return vds::make_unexpected<std::runtime_error>("Invalid data");
+    return vds::make_unexpected<std::runtime_error>("Invalid data at vds::binary_deserializer::get(uint64_t)");
   }
   
   value = *this->data_++;
@@ -203,7 +203,7 @@ vds::expected<void> vds::binary_deserializer::get(vds::const_data_buffer & data)
 
 
   if (len> this->len_) {
-    return vds::make_unexpected<std::runtime_error>("Invalid data");
+    return vds::make_unexpected<std::runtime_error>("Invalid data at vds::binary_deserializer::get(const_data_buffer)");
   }
 
   data.resize(safe_cast<size_t>(len));
@@ -225,7 +225,7 @@ vds::expected<void> vds::binary_deserializer::pop_data(void* data, size_t& size,
   }
 
   if (size > this->len_) {
-    return vds::make_unexpected<std::runtime_error>("Invalid data");
+    return vds::make_unexpected<std::runtime_error>("Invalid data at vds::binary_deserializer::pop_data()");
   }
 
   memcpy(data, this->data_, size);
