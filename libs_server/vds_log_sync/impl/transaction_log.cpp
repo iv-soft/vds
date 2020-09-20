@@ -354,8 +354,12 @@ vds::expected<bool> vds::transactions::transaction_log::update_consensus(
         is_new = true;
       }
       else {
-        return vds::make_unexpected<std::runtime_error>("Invalid data in transaction_log_vote_request_dbo");
-      }
+        return vds::make_unexpected<std::runtime_error>(
+          "Invalid data in transaction_log_vote_request_dbo(current_block.id=" + base64::from_bytes(current_block.id())
+          + ", owner=" + base64::from_bytes(block.write_public_key_id())
+          + ") at vds::transactions::transaction_log::update_consensus(block.id=" + base64::from_bytes(block.id())
+          + ", state=" + std::to_string(state)
+          + ", in_consensus=" + (in_consensus ? "true" : "false"));
     }
     else {
       if (t2.approved.get(st)) {

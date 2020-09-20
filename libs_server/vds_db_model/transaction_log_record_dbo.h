@@ -64,4 +64,25 @@ namespace vds {
   }
 }
 
+namespace std {
+  inline std::string to_string(vds::orm::transaction_log_record_dbo::state_t value) {
+    switch(value) {
+    case vds::orm::transaction_log_record_dbo::state_t::validated:
+      return "validated";
+
+    case vds::orm::transaction_log_record_dbo::state_t::processed:
+      return "processed";
+
+    case vds::orm::transaction_log_record_dbo::state_t::leaf:
+      return "leaf";
+
+    case vds::orm::transaction_log_record_dbo::state_t::invalid:
+      return "invalid";
+
+    default:
+      return std::to_string((int)value);
+    };
+  }
+}
+
 #endif //__VDS_DB_MODEL_TRANSACTION_LOG_RECORD_H_
