@@ -360,6 +360,7 @@ vds::expected<bool> vds::transactions::transaction_log::update_consensus(
           + ") at vds::transactions::transaction_log::update_consensus(block.id=" + base64::from_bytes(block.id())
           + ", state=" + std::to_string(state)
           + ", in_consensus=" + (in_consensus ? "true" : "false"));
+      }
     }
     else {
       if (t2.approved.get(st)) {
