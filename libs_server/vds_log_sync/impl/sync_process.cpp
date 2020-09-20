@@ -313,6 +313,8 @@ vds::expected<bool> vds::transaction_log::sync_process::apply_message(
     message.data,
     !exists));
 
+  CHECK_EXPECTED(this->query_unknown_records(t, final_tasks));
+
   return true;
 }
 

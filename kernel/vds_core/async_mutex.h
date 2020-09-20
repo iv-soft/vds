@@ -19,6 +19,7 @@ namespace vds {
       this->tasks_.push_back(result);
       lock.unlock();
       
+      assert(nullptr != imt_service::get_current());//to avoid deadlock
       if (is_empty) {
         result.set_value();
       }
@@ -31,6 +32,7 @@ namespace vds {
       std::unique_lock<std::mutex> lock(this->task_mutex_);
       this->tasks_.pop_front();
       if (!this->tasks_.empty()) {
+        assert(nullptr != imt_service::get_current());//to avoid deadlock
         this->tasks_.front().set_value();
       }
       lock.unlock();

@@ -960,7 +960,7 @@ vds::expected<void> vds::dht::network::_client::update_wellknown_connection(
           auto sp = this->sp_;
           t->try_handshake(address).then([address, sp](expected<void> result) {
             if (result.has_error()) {
-              sp->get<logger>()->error(ThisModule, "%s at update_wellknown_connection %s", result.error()->what(), address.c_str());
+              sp->get<logger>()->trace(ThisModule, "%s at update_wellknown_connection %s", result.error()->what(), address.c_str());
             }
             else {
               sp->get<logger>()->trace(ThisModule, "update_wellknown_connection %s successful", address.c_str());
@@ -978,7 +978,7 @@ vds::expected<void> vds::dht::network::_client::update_wellknown_connection(
         auto sp = this->sp_;
         t->try_handshake("udp://localhost:8050").then([sp](expected<void> result) {
           if (result.has_error()) {
-            sp->get<logger>()->error(ThisModule, "%s at update_wellknown_connection udp://localhost:8050", result.error()->what());
+            sp->get<logger>()->trace(ThisModule, "%s at update_wellknown_connection udp://localhost:8050", result.error()->what());
           }
           else {
             sp->get<logger>()->trace(ThisModule, "update_wellknown_connection udp://localhost:8050 successful");
