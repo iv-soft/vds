@@ -240,7 +240,8 @@ vds::expected<bool> vds::dht::network::sync_process::apply_message(
 vds::expected<void> vds::dht::network::sync_process::sync_replicas(
   database_transaction& t,
   std::list<std::function<async_task<expected<void>>()>> & final_tasks) {
-  if (this->sync_replicas_timeout_++ == 30) {
+  if (this->sync_replicas_timeout_++ > 30) {
+    this->sync_replicas_timeout_ = 0;
     const auto pclient = this->sp_->get<client>();
     std::set<const_data_buffer> requested_objects;
     std::map<const_data_buffer/*object_id*/, std::map<const_data_buffer/*node*/, std::set<uint16_t/*replicas*/>>> nodes;
