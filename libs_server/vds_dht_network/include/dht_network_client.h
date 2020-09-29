@@ -63,7 +63,8 @@ namespace vds {
           const service_provider * sp,
           transactions::transaction_block_builder & block,
           database_transaction& t,
-          bool allow_root);
+          bool allow_root,
+          std::list<std::function<async_task<expected<void>>()>>& final_tasks);
 
         //expected<std::shared_ptr<stream_output_async<uint8_t>>> start_save(
         //  const service_provider * sp) const;

@@ -88,7 +88,8 @@ namespace vds {
           database_transaction& t,
           const const_data_buffer& data_hash,
           const filename & original_file,
-          const const_data_buffer& owner);
+          const const_data_buffer& owner,
+          std::list<std::function<async_task<expected<void>>()>>& final_tasks);
 
         expected<std::vector<vds::const_data_buffer>> save_temp(
           database_transaction& t,

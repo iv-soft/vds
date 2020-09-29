@@ -537,7 +537,8 @@ vds::expected<vds::filename> vds::dht::network::_client::save_data(
   database_transaction& t,
   const const_data_buffer& data_hash,
   const filename& original_file,
-  const const_data_buffer& owner) {
+  const const_data_buffer& owner,
+  std::list<std::function<async_task<expected<void>>()>>& final_tasks) {
   auto client = sp->get<network::client>();
 
   orm::local_data_dbo t1;
@@ -592,7 +593,12 @@ vds::expected<vds::filename> vds::dht::network::_client::save_data(
   CHECK_EXPECTED(fl.create());
 
   filename fn(fl, append_path.substr(20));
-  CHECK_EXPECTED(file::move(original_file, fn));
+  CHECK_EXPECTED(file::copy(original_file, fn, true));
+
+  final_tasks.push_back([original_file]() -> async_task<expected<void>> {
+    CHECK_EXPECTED(file::delete_file(original_file));
+    return expected<void>();
+  });
 
   CHECK_EXPECTED(t.execute(t1.insert(
     t1.storage_id = storage_id,
@@ -1186,7 +1192,8 @@ vds::expected<vds::const_data_buffer> vds::dht::network::client::save(
   const service_provider * sp,
   transactions::transaction_block_builder & block,
   database_transaction & t,
-  bool allow_root)
+  bool allow_root,
+  std::list<std::function<async_task<expected<void>>()>>& final_tasks)
 {
   if (!this->node_public_key_) {
     CHECK_EXPECTED(this->load_keys(sp, t));
@@ -1210,7 +1217,7 @@ vds::expected<vds::const_data_buffer> vds::dht::network::client::save(
   GET_EXPECTED(log_block, transactions::transaction_block::create(data));
   std::set<const_data_buffer> processed;
   CHECK_EXPECTED(log_block.walk_messages(
-    [&t, sp, &processed](const transactions::store_block_transaction& message)->expected<bool> {
+    [&t, sp, &processed, &final_tasks](const transactions::store_block_transaction& message)->expected<bool> {
       auto client = sp->get<dht::network::client>();
       GET_EXPECTED(root_folder, persistence::current_user(sp));
       foldername tmp_folder(root_folder, "tmp");
@@ -1228,14 +1235,14 @@ vds::expected<vds::const_data_buffer> vds::dht::network::client::save(
             str_replace(append_path, '/', '_');
 
             filename fn(tmp_folder, append_path);
-            if (file::exists(fn)) {
-              CHECK_EXPECTED((*client)->save_data(
-                sp,
-                t,
-                p,
-                fn,
-                message.owner_id));
-            }
+            CHECK_EXPECTED((*client)->save_data(
+              sp,
+              t,
+              p,
+              fn,
+              message.owner_id,
+              final_tasks));
+
             CHECK_EXPECTED(t.execute(t1.delete_if(t1.object_id == p)));
           }
         }

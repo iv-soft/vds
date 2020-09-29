@@ -300,7 +300,7 @@ vds::expected<void> vds::dht::network::sync_process::sync_replicas(
           if (st_execute) {
             transactions::transaction_block_builder playload;
             CHECK_EXPECTED(playload.add(message_create<transactions::host_block_transaction>(owner, replica_hash)));
-            CHECK_EXPECTED(pclient->save(this->sp_, playload, t, false));
+            CHECK_EXPECTED(pclient->save(this->sp_, playload, t, false, final_tasks));
           }
           else if (!stored.empty()) {
             for (const auto& candidate : stored) {
