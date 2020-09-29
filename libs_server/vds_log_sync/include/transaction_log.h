@@ -23,6 +23,7 @@ namespace vds {
     class asset_issue_transaction;
     class store_block_transaction;
     class host_block_transaction;
+    class host_delete_block_transaction;
 
     class transaction_log {
     public:
@@ -240,6 +241,24 @@ namespace vds {
         const service_provider* sp,
         class database_transaction& t,
         const host_block_transaction& message,
+        const transaction_block& block);
+      //////////// host_delete_block_transaction
+      static expected<bool> apply_record(
+        const service_provider* sp,
+        class database_transaction& t,
+        const host_delete_block_transaction& message,
+        const transaction_block& block);
+
+      static expected<void> consensus_record(
+        const service_provider* sp,
+        class database_transaction& t,
+        const host_delete_block_transaction& message,
+        const transaction_block& block);
+
+      static expected<void> undo_record(
+        const service_provider* sp,
+        class database_transaction& t,
+        const host_delete_block_transaction& message,
         const transaction_block& block);
     };
   }

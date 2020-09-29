@@ -43,6 +43,9 @@ namespace vds {
       expected<void> add(expected<host_block_transaction>&& item) {
         return add_transaction<host_block_transaction>(std::move(item));
       }
+      expected<void> add(expected<host_delete_block_transaction>&& item) {
+        return add_transaction<host_delete_block_transaction>(std::move(item));
+      }
       expected<void> add(expected<create_wallet_transaction> && item) {
         return add_transaction<create_wallet_transaction>(std::move(item));
       }

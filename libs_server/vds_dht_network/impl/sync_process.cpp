@@ -192,7 +192,7 @@ vds::expected<bool> vds::dht::network::sync_process::apply_message(
       });
   }
   else {
-    this->sp_->get<logger>()->debug(
+    this->sp_->get<logger>()->error(
       SyncModule,
       "Not found replica %s requested by %s",
       base64::from_bytes(message.object_id).c_str(),
@@ -287,7 +287,8 @@ vds::expected<void> vds::dht::network::sync_process::sync_replicas(
           }
         }
 
-        if (stored.empty() || (p->second.size() < service::GENERATE_HORCRUX && stored.end() == stored.find(pclient->current_node_id()))) {
+        if (stored.empty() || (p->second.size() < service::GENERATE_HORCRUX
+          && stored.end() == stored.find(pclient->current_node_id()))) {
           orm::node_storage_dbo t4;
           orm::local_data_dbo t5;
           GET_EXPECTED(st, t.get_reader(

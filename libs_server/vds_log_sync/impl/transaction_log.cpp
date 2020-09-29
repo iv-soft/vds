@@ -589,7 +589,15 @@ vds::expected<bool> vds::transactions::transaction_log::process_records(const se
         undo_actions.push([sp, &t, message, &block]() {return undo_record(sp, t, message, block); });
       }
       return result;
+    },
+      [sp, &t, &undo_actions, &block](const host_delete_block_transaction& message)->expected<bool> {
+      GET_EXPECTED(result, apply_record(sp, t, message, block));
+      if (result) {
+        undo_actions.push([sp, &t, message, &block]() {return undo_record(sp, t, message, block); });
+      }
+      return result;
     }
+
     ));
 
   if (!completed) {
@@ -639,6 +647,10 @@ vds::expected<void> vds::transactions::transaction_log::consensus_records(
       [sp, &t, &block](const host_block_transaction& message)->expected<bool> {
       CHECK_EXPECTED(consensus_record(sp, t, message, block));
       return true;
+    },
+      [sp, &t, &block](const host_delete_block_transaction& message)->expected<bool> {
+      CHECK_EXPECTED(consensus_record(sp, t, message, block));
+      return true;
     }
     ));
 
@@ -684,8 +696,12 @@ vds::expected<void> vds::transactions::transaction_log::undo_records(
     [&to_process](const host_block_transaction& message)->expected<bool> {
     to_process.emplace([message](const service_provider* sp, database_transaction& t, const transaction_block& block) { return undo_record(sp, t, message, block); });
     return true;
+    },
+    [&to_process](const host_delete_block_transaction& message)->expected<bool> {
+      to_process.emplace([message](const service_provider* sp, database_transaction& t, const transaction_block& block) { return undo_record(sp, t, message, block); });
+      return true;
     }
-  ));
+    ));
 
   while (!to_process.empty()) {
     CHECK_EXPECTED(to_process.top()(sp, t, block));
@@ -1406,6 +1422,42 @@ vds::expected<void> vds::transactions::transaction_log::undo_record(const servic
       t3.owner_id == message.owner_id
       && t3.replica_hash == message.replica_hash
       && t3.node == block.write_public_key_id()
+    )
+  ));
+
+  return expected<void>();
+}
+
+vds::expected<bool> vds::transactions::transaction_log::apply_record(
+  const service_provider* sp,
+  database_transaction& t,
+  const host_delete_block_transaction& message,
+  const transaction_block& block)
+{
+  orm::sync_replica_map_dbo t2;
+  CHECK_EXPECTED(t.execute(
+    t2.delete_if(
+      t2.replica_hash == message.replica_hash
+      && t2.node == block.write_public_key_id()
+    )
+  ));
+
+  return true;
+}
+
+vds::expected<void> vds::transactions::transaction_log::consensus_record(const service_provider* sp, database_transaction& t, const host_delete_block_transaction& message, const transaction_block& block)
+{
+  return expected<void>();
+}
+
+vds::expected<void> vds::transactions::transaction_log::undo_record(const service_provider* sp, database_transaction& t, const host_delete_block_transaction& message, const transaction_block& block)
+{
+  orm::sync_replica_map_dbo t2;
+  CHECK_EXPECTED(t.execute(
+    t2.insert(
+      t2.replica_hash = message.replica_hash,
+      t2.node = block.write_public_key_id(),
+      t2.last_access = std::chrono::system_clock::now()
     )
   ));
 

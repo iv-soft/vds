@@ -50,6 +50,10 @@ namespace vds {
         return true;
       }
 
+      virtual expected<bool> visit(const host_delete_block_transaction& /*message*/) {
+        return true;
+      }
+
       expected<bool> process(const const_data_buffer & message_data) {
         binary_deserializer s(message_data);
 
@@ -116,6 +120,14 @@ namespace vds {
             }
             case transactions::host_block_transaction::message_id: {
               GET_EXPECTED(message, message_deserialize<host_block_transaction>(s));
+              GET_EXPECTED(result, this->visit(message));
+              if (!result) {
+                return false;
+              }
+              break;
+            }
+            case transactions::host_delete_block_transaction::message_id: {
+              GET_EXPECTED(message, message_deserialize<host_delete_block_transaction>(s));
               GET_EXPECTED(result, this->visit(message));
               if (!result) {
                 return false;
