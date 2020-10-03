@@ -36,8 +36,7 @@ namespace vds {
 				replica_hash VARCHAR(64) NOT NULL,\
 				replica_size INTEGER NOT NULL,\
 				distance INTEGER NOT NULL,\
-				CONSTRAINT pk_chunk_replica_data PRIMARY KEY(owner_id, object_hash,replica),\
-				CONSTRAINT idx_chunk_replica_data_replica_hash UNIQUE(replica_hash))";
+				CONSTRAINT pk_chunk_replica_data PRIMARY KEY(owner_id, object_hash,replica))";
 		};
 	}
 }

@@ -1303,7 +1303,7 @@ vds::expected<bool> vds::transactions::transaction_log::apply_record(
   for (uint16_t index = 0; index < message.replicas.size(); ++index) {
     orm::chunk_replica_data_dbo t1;
     CHECK_EXPECTED(t.execute(
-      t1.insert(
+      t1.insert_or_ignore(
         t1.owner_id = message.owner_id,
         t1.object_hash = message.object_id,
         t1.replica = index,
@@ -1315,7 +1315,7 @@ vds::expected<bool> vds::transactions::transaction_log::apply_record(
 
     orm::sync_replica_map_dbo t2;
     CHECK_EXPECTED(t.execute(
-      t2.insert(
+      t2.insert_or_ignore(
         t2.replica_hash = message.replicas[index],
         t2.node = block.write_public_key_id(),
         t2.last_access = std::chrono::system_clock::now()        
@@ -1324,7 +1324,7 @@ vds::expected<bool> vds::transactions::transaction_log::apply_record(
 
     orm::sync_replica_payment_dbo t3;
     CHECK_EXPECTED(t.execute(
-      t3.insert(
+      t3.insert_or_ignore(
         t3.owner_id = message.owner_id,
         t3.replica_hash = message.replicas[index],
         t3.node = block.write_public_key_id(),
