@@ -527,17 +527,15 @@ vds::async_task<vds::expected<void>> vds::websocket_api::devices(
   CHECK_EXPECTED_ASYNC(co_await sp->get<db_model>()->async_read_transaction([sp, result_json, owner_id](database_read_transaction & t) -> expected<void> {
     orm::node_storage_dbo t1;
     orm::local_data_dbo t2;
-    db_value<int64_t> used_size;
     GET_EXPECTED(st, t.get_reader(
       t1.select(
         t1.storage_id,
         t1.local_path,
         t1.reserved_size,
         t1.usage_type,
-        db_sum(t2.replica_size).as(used_size))
-      .left_join(t2, t2.storage_id == t1.storage_id)
+        t1.usage_size)
       .where(t1.owner_id == owner_id)
-      .group_by(t1.storage_id, t1.local_path, t1.reserved_size, t1.usage_type)));
+      ));
   
     WHILE_EXPECTED(st.execute()) {
       if (!t1.local_path.get(st).empty()) {
@@ -545,7 +543,7 @@ vds::async_task<vds::expected<void>> vds::websocket_api::devices(
         result_item->add_property("id", base64::from_bytes(t1.storage_id.get(st)));
         result_item->add_property("local_path", t1.local_path.get(st));
         result_item->add_property("reserved_size", t1.reserved_size.get(st));
-        result_item->add_property("used_size", used_size.get(st));
+        result_item->add_property("used_size", t1.usage_size.get(st));
         result_item->add_property("usage_type", std::to_string(t1.usage_type.get(st)));
 
         auto free_size_result = foldername(t1.local_path.get(st)).free_size();

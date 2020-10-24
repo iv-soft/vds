@@ -110,24 +110,20 @@ vds::expected<std::vector<vds::const_data_buffer>> vds::dht::network::_client::s
       *replica_size = replica_data.size();
     }
 
+    auto client = this->sp_->get<dht::network::client>();
+
+    auto append_path = base64::from_bytes(replica_hash);
+    str_replace(append_path, '+', '#');
+    str_replace(append_path, '/', '_');
+
+    CHECK_EXPECTED(file::write_all(filename(tmp_folder, append_path), replica_data));
+
     orm::chunk_tmp_data_dbo t1;
-    GET_EXPECTED(st, t.get_reader(t1.select(t1.object_id).where(t1.object_id == replica_hash)));
-    GET_EXPECTED(st_execute, st.execute());
-    if (!st_execute) {
-      auto client = this->sp_->get<dht::network::client>();
-
-      auto append_path = base64::from_bytes(replica_hash);
-      str_replace(append_path, '+', '#');
-      str_replace(append_path, '/', '_');
-
-      CHECK_EXPECTED(file::write_all(filename(tmp_folder, append_path), replica_data));
-
-      CHECK_EXPECTED(t.execute(
-        t1.insert(
-          t1.object_id = replica_hash,
-          t1.last_sync = std::chrono::system_clock::now()
-        )));
-    }
+    CHECK_EXPECTED(t.execute(
+      t1.insert_or_ignore(
+        t1.object_id = replica_hash,
+        t1.last_sync = std::chrono::system_clock::now()
+      )));
     result[replica] = replica_hash;
   }
 
@@ -481,22 +477,21 @@ vds::expected<vds::filename> vds::dht::network::_client::save_data(
   }
 
   uint64_t allowed_size = 0;
+  uint64_t usage_size = 0;
   std::string local_path;
   const_data_buffer storage_id;
 
-  db_value<int64_t> data_size;
   GET_EXPECTED_VALUE(st, t.get_reader(
-    t2.select(t2.storage_id, t2.local_path, t2.reserved_size, db_sum(t1.replica_size).as(data_size))
-      .left_join(t1, t1.storage_id == t2.storage_id)
+    t2.select(t2.storage_id, t2.local_path, t2.reserved_size, t2.usage_size)
       .where((t2.usage_type == orm::node_storage_dbo::usage_type_t::share)
-        || (t2.usage_type == orm::node_storage_dbo::usage_type_t::exclusive && t2.owner_id == owner))
-      .group_by(t2.storage_id, t2.local_path, t2.reserved_size)));
+        || (t2.usage_type == orm::node_storage_dbo::usage_type_t::exclusive && t2.owner_id == owner))));
   WHILE_EXPECTED (st.execute()) {
-    const int64_t size = data_size.is_null(st) ? 0 : data_size.get(st);
+    const int64_t size = t2.usage_size.get(st);
     if (t2.reserved_size.get(st) > size && allowed_size < (t2.reserved_size.get(st) - size)) {
       allowed_size = (t2.reserved_size.get(st) - size);
       local_path = t2.local_path.get(st);
       storage_id = t2.storage_id.get(st);
+      usage_size = size;
     }
   }
   WHILE_EXPECTED_END()
@@ -529,6 +524,10 @@ vds::expected<vds::filename> vds::dht::network::_client::save_data(
     t1.storage_path = append_path.substr(0, 10) + "/" + append_path.substr(10, 10) + "/" + append_path.substr(20),
     t1.last_access = std::chrono::system_clock::now())));
 
+  CHECK_EXPECTED(t.execute(t2.update(
+    t2.usage_size = usage_size + data.size()
+  ).where(t2.storage_id == storage_id)));
+
   return fn;
 }
 
@@ -554,22 +553,22 @@ vds::expected<vds::filename> vds::dht::network::_client::save_data(
   }
 
   uint64_t allowed_size = 0;
+  uint64_t usage_size;
   std::string local_path;
   const_data_buffer storage_id;
 
-  db_value<int64_t> data_size;
   GET_EXPECTED_VALUE(st, t.get_reader(
-    t2.select(t2.storage_id, t2.local_path, t2.reserved_size, db_sum(t1.replica_size).as(data_size))
-    .left_join(t1, t1.storage_id == t2.storage_id)
+    t2.select(t2.storage_id, t2.local_path, t2.reserved_size, t2.usage_size)
     .where((t2.usage_type == orm::node_storage_dbo::usage_type_t::share)
       || (t2.usage_type == orm::node_storage_dbo::usage_type_t::exclusive && t2.owner_id == owner))
-    .group_by(t2.storage_id, t2.local_path, t2.reserved_size)));
+    ));
   WHILE_EXPECTED(st.execute()) {
-    const int64_t size = data_size.is_null(st) ? 0 : data_size.get(st);
+    const int64_t size = t2.usage_size.get(st);
     if (t2.reserved_size.get(st) > size&& allowed_size < (t2.reserved_size.get(st) - size)) {
       allowed_size = (t2.reserved_size.get(st) - size);
       local_path = t2.local_path.get(st);
       storage_id = t2.storage_id.get(st);
+      usage_size = size;
     }
   }
   WHILE_EXPECTED_END()
@@ -607,6 +606,11 @@ vds::expected<vds::filename> vds::dht::network::_client::save_data(
     t1.owner = owner,
     t1.storage_path = append_path.substr(0, 10) + "/" + append_path.substr(10, 10) + "/" + append_path.substr(20),
     t1.last_access = std::chrono::system_clock::now())));
+
+  CHECK_EXPECTED(t.execute(t2.update(
+    t2.usage_size = usage_size + size
+  ).where(t2.storage_id == storage_id)));
+
   return fn;
 }
 
@@ -636,22 +640,23 @@ vds::expected<void> vds::dht::network::_client::save_data(
     }
 
     uint64_t allowed_size = 0;
+    uint64_t usage_size;
     std::string local_path;
     const_data_buffer storage_id;
 
     db_value<int64_t> data_size;
     GET_EXPECTED_VALUE(st, t.get_reader(
-      t2.select(t2.storage_id, t2.local_path, t2.reserved_size, db_sum(t1.replica_size).as(data_size))
-      .left_join(t1, t1.storage_id == t2.storage_id)
+      t2.select(t2.storage_id, t2.local_path, t2.reserved_size, t2.usage_size)
       .where((t2.usage_type == orm::node_storage_dbo::usage_type_t::share)
         || (t2.usage_type == orm::node_storage_dbo::usage_type_t::exclusive && t2.owner_id == owner))
-      .group_by(t2.storage_id, t2.local_path, t2.reserved_size)));
+      ));
     WHILE_EXPECTED(st.execute()) {
-      const int64_t size = data_size.is_null(st) ? 0 : data_size.get(st);
+      const int64_t size = t2.usage_size.get(st);
       if (t2.reserved_size.get(st) > size && allowed_size < (t2.reserved_size.get(st) - size)) {
         allowed_size = (t2.reserved_size.get(st) - size);
         local_path = t2.local_path.get(st);
         storage_id = t2.storage_id.get(st);
+        usage_size = size;
       }
     }
     WHILE_EXPECTED_END()
@@ -683,6 +688,11 @@ vds::expected<void> vds::dht::network::_client::save_data(
       t1.owner = owner,
       t1.storage_path = append_path.substr(0, 10) + "/" + append_path.substr(10, 10) + "/" + append_path.substr(20),
       t1.last_access = std::chrono::system_clock::now())));
+
+    CHECK_EXPECTED(t.execute(t2.update(
+      t2.usage_size = usage_size + replica_data.size()
+    ).where(t2.storage_id == storage_id)));
+
   }
 
   return expected<void>();

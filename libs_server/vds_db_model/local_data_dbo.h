@@ -29,6 +29,21 @@ namespace vds {
       database_column<const_data_buffer, std::string> owner;
       database_column<std::string> storage_path;
       database_column<std::chrono::system_clock::time_point> last_access;
+
+      static constexpr const char* create_table =
+        "CREATE TABLE local_data_dbo(\
+			  storage_id VARCHAR(64) NOT NULL,\
+			  replica_hash VARCHAR(64) NOT NULL,\
+        replica_size INTEGER NOT NULL,\
+			  owner VARCHAR(64) NOT NULL,\
+			  storage_path VARCHAR(256) NOT NULL,\
+        last_access INTEGER NOT NULL,\
+        CONSTRAINT pk_local_data_dbo PRIMARY KEY(replica_hash,owner))"
+        ;
+      static constexpr const char* storage_id_index =
+        "CREATE INDEX local_data_storage_id_dbo ON local_data_dbo (storage_id)"
+        ;
+
     };
   }
 }
