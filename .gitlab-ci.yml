@@ -26,6 +26,7 @@ build-arm32:
     image: ubuntu:16.04
     stage: build
     script:
+        - ./build_dep.sh
         - mkdir build
         - ./build.sh
         - mkdir dist
