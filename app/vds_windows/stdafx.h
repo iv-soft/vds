@@ -14,6 +14,8 @@
 
 #include <shellapi.h>
 #include <commctrl.h>
+#include <Shlwapi.h>
+#pragma comment(lib, "shlwapi.lib")
 
 #include <tchar.h>
 

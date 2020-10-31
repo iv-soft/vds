@@ -1,6 +1,7 @@
 #include "stdafx.h"
 #include "TrayIcon.h"
 #include "StringUtils.h"
+#include "vds_windows.h"
 
 const TCHAR* TrayIcon::WndClassName = _T("VDS Tray Windows Class");
 const TCHAR* TrayIcon::WndWindowName = _T("VDS Tray Window");
@@ -136,6 +137,8 @@ bool TrayIcon::CreateWnd(int nCmdShow)
 
   SetWindowLongPtr(this->hWnd_, GWLP_USERDATA, reinterpret_cast<INT_PTR>(this));
 
+  SetTimer(this->hWnd_, 1, 1000 * 60 * 60, NULL);
+
   ShowWindow(this->hWnd_, nCmdShow);
   UpdateWindow(this->hWnd_);
 
@@ -162,19 +165,18 @@ LRESULT CALLBACK TrayIcon::WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARA
   case WM_APP + 1: {
     switch (LOWORD(lParam))
     {
-	case WM_LBUTTONUP: {
-		auto pthis = reinterpret_cast<TrayIcon *>(GetWindowLongPtr(hWnd, GWLP_USERDATA));
-    auto url = std::string("http://localhost:") + std::to_string(pthis->sp_->get<vds::dht::network::client>()->port());
-    ShellExecuteA(0, 0, url.c_str(), 0, 0, SW_SHOW);
-		break;
-	}
+    case WM_LBUTTONUP:
     case WM_RBUTTONUP:
     case WM_CONTEXTMENU: {
-      auto pthis = reinterpret_cast<TrayIcon *>(GetWindowLongPtr(hWnd, GWLP_USERDATA));
+      auto pthis = reinterpret_cast<TrayIcon*>(GetWindowLongPtr(hWnd, GWLP_USERDATA));
       pthis->ShowContextMenu();
       break;
     }
     }
+    break;
+  }
+  case WM_TIMER: {
+    execute_process("IVySoft.VDS.Client.AutoUpdate.exe");
     break;
   }
   case WM_CLOSE: {
@@ -188,6 +190,15 @@ LRESULT CALLBACK TrayIcon::WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARA
     // Parse the menu selections:
     switch (wmId)
     {
+    case ID_POPUP_DISK:
+      execute_process("IVySoft.VDS.Client.UI.WPF.Disk.exe");
+      break;
+    case ID_POPUP_WALLET:
+      execute_process("IVySoft.VDS.Client.UI.WPF.Wallet.exe");
+      break;
+    case ID_POPUP_MESSENGER:
+      execute_process("IVySoft.VDS.Client.UI.WPF.Messager.exe");
+      break;
     case ID_POPUP_EXIT: {
       PostQuitMessage(0);
       break;
