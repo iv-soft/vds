@@ -152,12 +152,10 @@ vds::expected<bool> vds::dht::network::sync_process::apply_message(
 
 
   orm::local_data_dbo t3;
-  orm::node_storage_dbo t4;
   orm::chunk_replica_data_dbo t5;
   GET_EXPECTED(st, t.get_reader(
     t3
-    .select(t3.storage_path, t4.local_path, t3.owner, t5.object_hash, t5.replica)
-    .inner_join(t4, t4.storage_id == t3.storage_id)
+    .select(t3.replica_data, t3.owner, t5.object_hash, t5.replica)
     .inner_join(t5, t5.replica_hash == t3.replica_hash)
     .where(t3.replica_hash == message.object_id)));
 
@@ -171,7 +169,8 @@ vds::expected<bool> vds::dht::network::sync_process::apply_message(
     const auto owner = t3.owner.get(st);
     const auto object_hash = t5.object_hash.get(st);
     const auto replica = t5.replica.get(st);
-    GET_EXPECTED(data, file::read_all(filename(foldername(t4.local_path.get(st)), t3.storage_path.get(st))));
+    const auto data = t3.replica_data.get(st);
+    //TODO: validate data
     final_tasks.push_back([
       client,
         data,
@@ -227,11 +226,11 @@ vds::expected<bool> vds::dht::network::sync_process::apply_message(
 
     GET_EXPECTED(data_hash, hash::signature(hash::sha256(), message.data));
     vds_assert(data_hash == message.object_id);
-    GET_EXPECTED(fn, _client::save_data(this->sp_, t, data_hash, message.data, message.owner, message.value_id, message.replica));
+    CHECK_EXPECTED(_client::save_replica_data(this->sp_, t, data_hash, message.data, message.owner));
     this->sp_->get<logger>()->trace(
       SyncModule,
       "Got replica %s from %s",
-      base64::from_bytes(message.object_id).c_str(),
+      base64::from_bytes(data_hash).c_str(),
       base64::from_bytes(message_info.source_node()).c_str());
 
   return true;
@@ -289,12 +288,10 @@ vds::expected<void> vds::dht::network::sync_process::sync_replicas(
 
         if (stored.empty() || (p->second.size() < service::GENERATE_HORCRUX
           && stored.end() == stored.find(pclient->current_node_id()))) {
-          orm::node_storage_dbo t4;
           orm::local_data_dbo t5;
           GET_EXPECTED(st, t.get_reader(
-            t4
-            .select(t4.local_path, t5.storage_path)
-            .inner_join(t5, t5.storage_id == t4.storage_id)
+            t5
+            .select(t5.replica_data)
             .where(t5.replica_hash == replica_hash)));
           GET_EXPECTED(st_execute, st.execute());
           if (st_execute) {

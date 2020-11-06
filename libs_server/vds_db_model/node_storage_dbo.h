@@ -21,7 +21,6 @@ namespace vds {
       node_storage_dbo()
       : database_table("node_storage_dbo"),
         storage_id(this, "storage_id"),
-        local_path(this, "local_path"),
         owner_id(this, "owner_id"),
         usage_size(this, "usage_size"),
         reserved_size(this, "reserved_size"),
@@ -30,7 +29,6 @@ namespace vds {
 
       database_column<const_data_buffer, std::string> storage_id;
 
-      database_column<std::string> local_path;
       database_column<const_data_buffer, std::string> owner_id;
       database_column<int64_t> usage_size;
       database_column<int64_t> reserved_size;
@@ -50,19 +48,13 @@ namespace vds {
       static constexpr const char* create_table =
         "CREATE TABLE node_storage_dbo (\
 			  storage_id VARCHAR(64) PRIMARY KEY NOT NULL,\
-			  local_path VARCHAR(512) NOT NULL,\
         owner_id VARCHAR(64) NOT NULL,\
         reserved_size INTEGER NOT NULL,\
+        usage_size INTEGER NOT NULL DEFAULT(0),\
         usage_type INTEGER NOT NULL)"
         ;
       static constexpr const char* usage_type_index =
         "CREATE INDEX node_storage_usage_type_dbo ON node_storage_dbo(usage_type, owner_id)"
-        ;
-      static constexpr const char* create_usage_size_column =
-        "ALTER TABLE node_storage_dbo ADD usage_size INTEGER NOT NULL DEFAULT(0)"
-        ;
-      static constexpr const char* init_usage_size_column =
-        "UPDATE node_storage_dbo SET usage_size=(SELECT SUM(replica_size) FROM local_data_dbo WHERE storage_id=node_storage_dbo.storage_id)"
         ;
     };
   }

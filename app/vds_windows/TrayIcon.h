@@ -6,6 +6,8 @@ public:
     static const TCHAR* WndClassName;
     static const TCHAR* WndWindowName;
 
+    static HANDLE hAutoUpdateProcess;
+
   TrayIcon();
   ~TrayIcon();
 

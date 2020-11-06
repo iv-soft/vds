@@ -315,17 +315,13 @@ namespace vds {
         const_data_buffer object_id;
         const_data_buffer data;
         const_data_buffer owner;
-        const_data_buffer value_id;
-        uint16_t replica;
 
         template <typename visitor_type>
         auto & visit(visitor_type & v) {
           return v(
             object_id,
             data,
-            owner,
-            value_id,
-            replica);
+            owner);
         }
       };
       ////////////////////////////////////////////////////////////////////////////////////////////////////////////////

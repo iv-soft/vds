@@ -288,7 +288,7 @@ vds::websocket_api::process_message(
   }
   else if ("allocate_storage" == method_name) {
     auto args = std::dynamic_pointer_cast<json_array>(request->get_property("params"));
-    if (!args || args->size() < 2) {
+    if (!args || args->size() < 3) {
       co_return make_unexpected<std::runtime_error>("invalid arguments at invoke method 'allocate_storage'");
     }
 
@@ -300,12 +300,18 @@ vds::websocket_api::process_message(
     GET_EXPECTED_ASYNC(public_key_der, base64::to_bytes(public_key_str->value()));
     GET_EXPECTED_ASYNC(public_key, asymmetric_public_key::parse_der(public_key_der));
 
-    auto folder = std::dynamic_pointer_cast<json_primitive>(args->get(1));
-    if (!folder || folder->value().empty()) {
-      co_return make_unexpected<std::runtime_error>("missing folder argument at invoke method 'allocate_storage'");
+    auto usage_type_str = std::dynamic_pointer_cast<json_primitive>(args->get(1));
+    if (!usage_type_str || usage_type_str->value().empty()) {
+      co_return make_unexpected<std::runtime_error>("missing usage_type argument at invoke method 'allocate_storage'");
+    }
+    GET_EXPECTED_ASYNC(usage_type, orm::node_storage_dbo::parse_usage_type(usage_type_str->value()));
+
+    auto size_str = std::dynamic_pointer_cast<json_primitive>(args->get(2));
+    if (!size_str || size_str->value().empty()) {
+      co_return make_unexpected<std::runtime_error>("missing size argument at invoke method 'allocate_storage'");
     }
 
-    CHECK_EXPECTED_ASYNC(co_await this->allocate_storage(sp, r, std::move(public_key), foldername(folder->value())));
+    CHECK_EXPECTED_ASYNC(co_await this->allocate_storage(sp, r, std::move(public_key), std::atol(size_str->value().c_str()), usage_type));
   }
   else if ("subscribe" == method_name) {
     auto args = std::dynamic_pointer_cast<json_array>(request->get_property("params"));
@@ -523,14 +529,14 @@ vds::async_task<vds::expected<void>> vds::websocket_api::devices(
   const_data_buffer owner_id)
 {
   auto result_json = std::make_shared<json_array>();
+  GET_EXPECTED_ASYNC(current_user, persistence::current_user(sp));
   
-  CHECK_EXPECTED_ASYNC(co_await sp->get<db_model>()->async_read_transaction([sp, result_json, owner_id](database_read_transaction & t) -> expected<void> {
+  CHECK_EXPECTED_ASYNC(co_await sp->get<db_model>()->async_read_transaction([sp, result_json, current_user, owner_id](database_read_transaction & t) -> expected<void> {
     orm::node_storage_dbo t1;
     orm::local_data_dbo t2;
     GET_EXPECTED(st, t.get_reader(
       t1.select(
         t1.storage_id,
-        t1.local_path,
         t1.reserved_size,
         t1.usage_type,
         t1.usage_size)
@@ -538,20 +544,17 @@ vds::async_task<vds::expected<void>> vds::websocket_api::devices(
       ));
   
     WHILE_EXPECTED(st.execute()) {
-      if (!t1.local_path.get(st).empty()) {
-        auto result_item = std::make_shared<json_object>();
-        result_item->add_property("id", base64::from_bytes(t1.storage_id.get(st)));
-        result_item->add_property("local_path", t1.local_path.get(st));
-        result_item->add_property("reserved_size", t1.reserved_size.get(st));
-        result_item->add_property("used_size", t1.usage_size.get(st));
-        result_item->add_property("usage_type", std::to_string(t1.usage_type.get(st)));
+      auto result_item = std::make_shared<json_object>();
+      result_item->add_property("id", base64::from_bytes(t1.storage_id.get(st)));
+      result_item->add_property("reserved_size", t1.reserved_size.get(st));
+      result_item->add_property("used_size", t1.usage_size.get(st));
+      result_item->add_property("usage_type", std::to_string(t1.usage_type.get(st)));
 
-        auto free_size_result = foldername(t1.local_path.get(st)).free_size();
-        if (free_size_result.has_value()) {
-          result_item->add_property("free_size", free_size_result.value());
-        }
-        result_json->add(result_item);
+      auto free_size_result = foldername(current_user).free_size();
+      if (free_size_result.has_value()) {
+        result_item->add_property("free_size", free_size_result.value());
       }
+      result_json->add(result_item);
     }
     WHILE_EXPECTED_END()
     return expected<void>();
@@ -619,68 +622,14 @@ vds::async_task<vds::expected<void>> vds::websocket_api::allocate_storage(
     const vds::service_provider* sp,
     std::shared_ptr<json_object> result,
     asymmetric_public_key user_public_key,
-    foldername folder)
+    size_t size,
+    orm::node_storage_dbo::usage_type_t usage_type)
 {
-    GET_EXPECTED(json, json_parser::parse(".vds_storage.json", file::read_all(filename(folder, ".vds_storage.json"))));
-    auto sign_info = std::dynamic_pointer_cast<json_object>(json);
-    if (!sign_info) {
-        return vds::make_unexpected<std::runtime_error>("Invalid format");
-    }
-
-    std::string version;
-    if (!sign_info->get_property("vds", version) || version != "0.1") {
-        return vds::make_unexpected<std::runtime_error>("Invalid file version");
-    }
-
-    std::string size_str;
-    if (!sign_info->get_property("size", size_str)) {
-        return vds::make_unexpected<std::runtime_error>("Missing size parameter");
-    }
-
-    char* end;
-    const auto size = std::strtoull(size_str.c_str(), &end, 10);
-    if (size_str != std::to_string(size) || (nullptr != end && '\0' != *end)) {
-        return vds::make_unexpected<std::runtime_error>("Invalid size parameter value " + size_str);
-    }
-
     GET_EXPECTED(key_id, user_public_key.fingerprint());
-    const_data_buffer value;
-    if (!sign_info->get_property("name", value) || value != key_id) {
-        return vds::make_unexpected<std::runtime_error>("Invalid user name");
-    }
 
-    std::string usage_type_str;
-    if (!sign_info->get_property("usage", usage_type_str)) {
-      return vds::make_unexpected<std::runtime_error>("Invalid folder usage");
-    }
-
-    GET_EXPECTED(usage_type, orm::node_storage_dbo::parse_usage_type(usage_type_str));
-
-    if (!sign_info->get_property("sign", value)) {
-        return vds::make_unexpected<std::runtime_error>("The signature is missing");
-    }
-
-    auto sig_body = std::make_shared<json_object>();
-    sig_body->add_property("vds", "0.1");
-    sig_body->add_property("name", key_id);
-    sig_body->add_property("size", size_str);
-    sig_body->add_property("usage", std::to_string(usage_type));
-
-    GET_EXPECTED(body, sig_body->json_value::str());
-    GET_EXPECTED(sig_ok, asymmetric_sign_verify::verify(
-        hash::sha256(),
-        user_public_key,
-        value,
-        body.c_str(),
-        body.length()));
-
-    if (!sig_ok) {
-        return vds::make_unexpected<std::runtime_error>("Invalid signature");
-    }
-
-    return sp->get<db_model>()->async_transaction([sp, key_id, folder, size, usage_type, result](database_transaction& t) -> expected<void> {
+    return sp->get<db_model>()->async_transaction([sp, key_id, size, usage_type, result](database_transaction& t) -> expected<void> {
         orm::node_storage_dbo t1;
-        GET_EXPECTED(st, t.get_reader(t1.select(t1.storage_id, t1.reserved_size).where(t1.local_path == folder.full_name() && t1.owner_id == key_id)));
+        GET_EXPECTED(st, t.get_reader(t1.select(t1.storage_id, t1.reserved_size).where(t1.owner_id == key_id)));
         GET_EXPECTED(exists, st.execute());
         if (exists) {
             result->add_property("result", base64::from_bytes(t1.storage_id.get(st)));
@@ -689,7 +638,7 @@ vds::async_task<vds::expected<void>> vds::websocket_api::allocate_storage(
                 return t.execute(
                     t1
                     .update(t1.reserved_size = (int64_t)size)
-                    .where(t1.local_path == folder.full_name() && t1.owner_id == key_id));
+                    .where(t1.owner_id == key_id));
             } else {
                 return expected<void>();
             }
@@ -700,7 +649,6 @@ vds::async_task<vds::expected<void>> vds::websocket_api::allocate_storage(
             binary_serializer s;
             CHECK_EXPECTED(s << client->current_node_id());
             CHECK_EXPECTED(s << key_id);
-            CHECK_EXPECTED(s << folder.full_name());
 
             GET_EXPECTED(storage_id, hash::signature(hash::sha256(), s.move_data()));
 
@@ -709,7 +657,6 @@ vds::async_task<vds::expected<void>> vds::websocket_api::allocate_storage(
             return t.execute(
                 t1.insert(
                     t1.storage_id = storage_id,
-                    t1.local_path = folder.full_name(),
                     t1.owner_id = key_id,
                     t1.reserved_size = (int64_t)size,
                     t1.usage_type = usage_type));

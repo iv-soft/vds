@@ -23,92 +23,74 @@ namespace vds {
       std::string user_name_;
     };
 
-    class channel_messages_walker {
+    typedef std::tuple<
+      channel_add_reader_transaction,
+      channel_add_writer_transaction,
+      channel_create_transaction,
+      user_message_transaction,
+      control_message_transaction
+    > message_types;
+
+    template<size_t index>
+    class channel_messages_walker_base;
+    
+    template<>
+    class channel_messages_walker_base<0> {
+    protected:
+      expected<bool> visit(channel_message_id message_id, binary_deserializer & s, const message_environment_t& message_environment) {
+        return vds::make_unexpected<std::runtime_error>("Invalid channel message " + std::to_string((uint8_t)message_id));
+      }
+
+      expected<void> set_handler(channel_message_id message_id, lambda_holder_t<expected<bool>, binary_deserializer& /*s*/, const message_environment_t& /*message_environment*/> && handler) {
+        return vds::make_unexpected<std::runtime_error>("Invalid channel message " + std::to_string((uint8_t)message_id));
+      }
+    };
+
+    template<size_t index>
+    class channel_messages_walker_base : public channel_messages_walker_base<index - 1> {
+    protected:
+      using message_type = std::tuple_element_t<index - 1, message_types>;
+
+      expected<bool> visit(channel_message_id message_id, binary_deserializer& s, const message_environment_t& message_environment) {
+        if (message_id == message_type::message_id) {
+          if (!this->handler_) {
+            GET_EXPECTED(message, message_deserialize<message_type>(s));
+            return expected<bool>(true);
+          }
+          return this->handler_(s, message_environment);
+        }
+
+        return channel_messages_walker_base<index - 1>::visit(message_id, s, message_environment);
+      }
+
+      expected<void> set_handler(channel_message_id message_id, lambda_holder_t<expected<bool>, binary_deserializer& /*s*/, const message_environment_t& /*message_environment*/>&& handler) {
+        if (message_id == message_type::message_id) {
+          this->handler_ = std::move(handler);
+          return expected<void>();
+        }
+
+        return channel_messages_walker_base<index - 1>::set_handler(message_id, s, std::move(handler));
+      }
+
+    private:
+      lambda_holder_t<expected<bool>, binary_deserializer& /*s*/, const message_environment_t&> handler_;
+    };
+
+    class channel_messages_walker : public channel_messages_walker_base<std::tuple_size<message_types>::value>{
     public:
-      virtual expected<bool> visit(const channel_add_reader_transaction & /*message*/, const message_environment_t & /*message_environment*/) {
-        return true;
-      }
-
-      virtual expected<bool> visit(const channel_add_writer_transaction & /*message*/, const message_environment_t & /*message_environment*/) {
-        return true;
-      }
-
-      virtual expected<bool> visit(const channel_create_transaction & /*message*/, const message_environment_t & /*message_environment*/) {
-        return true;
-      }
-
-      virtual expected<bool> visit(const user_message_transaction & /*message*/, const message_environment_t & /*message_environment*/) {
-        return true;
-      }
-
-      virtual expected<bool> visit(const control_message_transaction & /*message*/, const message_environment_t & /*message_environment*/) {
-        return true;
-      }
-
       expected<bool> process(
               const service_provider * sp,
               const const_data_buffer & message_data,
               const message_environment_t & message_environment) {
         binary_deserializer s(message_data);
 
-        //std::string log;
-        //for(size_t i = 0; i < message_data.size(); ++i){
-        //    char buf[3];
-        //    sprintf(buf, "%02X", message_data[i]);
-        //    log += buf;
-        //}
-        //sp->get<logger>()->debug("UserMng", "Process message [%s]", log.c_str());
-
         while(0 < s.size()) {
           uint8_t message_id;
           CHECK_EXPECTED(s >> message_id);
 
-          sp->get<logger>()->debug("UserMng", "Process message %d", message_id);
-
-          switch((channel_message_id)message_id) {
-          case channel_add_reader_transaction::message_id: {
-            GET_EXPECTED(message, message_deserialize<channel_add_reader_transaction>(s));
-            GET_EXPECTED(result, this->visit(message, message_environment));
-            if (!result) {
-              return false;
-            }
-            break;
-          }
-            case channel_add_writer_transaction::message_id: {
-              GET_EXPECTED(message, message_deserialize<channel_add_writer_transaction>(s));
-              GET_EXPECTED(result, this->visit(message, message_environment));
-              if (!result) {
-                return false;
-              }
-              break;
-            }
-            case channel_create_transaction::message_id: {
-              GET_EXPECTED(message, message_deserialize<channel_create_transaction>(s));
-              GET_EXPECTED(result, this->visit(message, message_environment));
-              if (!result) {
-                return false;
-              }
-              break;
-            }
-            case user_message_transaction::message_id: {
-              GET_EXPECTED(message, message_deserialize<user_message_transaction>(s));
-              GET_EXPECTED(result, this->visit(message, message_environment));
-              if (!result) {
-                return false;
-              }
-              break;
-            }
-            case control_message_transaction::message_id: {
-              GET_EXPECTED(message, message_deserialize<control_message_transaction>(s));
-              GET_EXPECTED(result, this->visit(message, message_environment));
-              if (!result) {
-                return false;
-              }
-              break;
-            }
-            default: {
-            return vds::make_unexpected<std::runtime_error>("Invalid channel message " + std::to_string(message_id));
-          }
+          GET_EXPECTED(result, this->visit((channel_message_id)message_id, s, message_environment));
+          if (!result) {
+            return false;
           }
         }
 
@@ -135,20 +117,16 @@ namespace vds {
       using base_class = channel_messages_walker_lambdas<handler_types...>;
     public:
       channel_messages_walker_lambdas(
-          first_handler_type && first_handler,
-          handler_types && ... handler)
-      : base_class(std::forward<handler_types>(handler)...),
-        first_handler_(std::forward<first_handler_type>(first_handler)) {
+        first_handler_type&& first_handler,
+        handler_types && ... handler)
+        : base_class(std::forward<handler_types>(handler)...) {
+        this->set_handler(std::tuple_element_t<0, typename functor_info<first_handler_type>::arguments_tuple>::message_id, [handler = std::move(first_handler)](
+          binary_deserializer& s,
+          const message_environment_t& message_environment) {
+            GET_EXPECTED(message, message_deserialize<typename std::tuple_element_t<0, typename functor_info<first_handler_type>::arguments_tuple>>(s));
+            return handler(message, message_environment);
+          });
       }
-
-      expected<bool> visit(
-        const typename std::tuple_element_t<0, typename functor_info<first_handler_type>::arguments_tuple> & message,
-        const message_environment_t & message_environment) override {
-        return this->first_handler_(message, message_environment);
-      }
-
-    private:
-      first_handler_type first_handler_;
     };
   }
 }

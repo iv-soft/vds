@@ -5,6 +5,7 @@
 #include "chunk_replica_data_dbo.h"
 #include "node_storage_dbo.h"
 #include "local_data_dbo.h"
+#include "chunk_tmp_data_dbo.h"
 
 vds::async_task<vds::expected<void>> vds::db_model::async_transaction(lambda_holder_t<expected<void>, class database_transaction &> handler) {
   return this->db_.async_transaction([h = std::move(handler)](database_transaction & t)->expected<bool> {
@@ -88,11 +89,7 @@ vds::expected<void> vds::db_model::migrate(
       private_key BLOB NOT NULL)",
 
       orm::node_storage_dbo::create_table,
-
-      "CREATE TABLE chunk_tmp_data (\
-			object_id VARCHAR(64) PRIMARY KEY NOT NULL,\
-			last_sync INTEGER NOT NULL)",
-
+      orm::chunk_tmp_data_dbo::create_table,
 
       "CREATE TABLE channel_local_cache(\
       channel_id VARCHAR(64) PRIMARY KEY NOT NULL,\
@@ -141,6 +138,8 @@ vds::expected<void> vds::db_model::migrate(
 
       orm::chunk_replica_data_dbo::create_table,
       orm::local_data_dbo::create_table,
+      orm::local_data_dbo::storage_id_index,
+      orm::node_storage_dbo::usage_type_index,
 
       "CREATE TABLE member_user_dbo(\
 			id VARCHAR(64) PRIMARY KEY NOT NULL,\
@@ -249,32 +248,6 @@ vds::expected<void> vds::db_model::migrate(
     for(size_t i = 0; i < sizeof(commands) / sizeof(commands[0]); ++i) {
       CHECK_EXPECTED(t.execute(commands[i]));
     }
-  }
-
-  if (2 > db_version) {
-    static const char* commands[] = {
-      orm::local_data_dbo::storage_id_index,
-      orm::node_storage_dbo::usage_type_index,
-
-      "UPDATE module SET version=2, installed=datetime('now') WHERE id='kernel' AND version=1"
-    };
-    for (size_t i = 0; i < sizeof(commands) / sizeof(commands[0]); ++i) {
-      CHECK_EXPECTED(t.execute(commands[i]));
-    }
-
-  }
-
-  if (3 > db_version) {
-    static const char* commands[] = {
-      orm::node_storage_dbo::create_usage_size_column,
-      orm::node_storage_dbo::init_usage_size_column,
-
-      "UPDATE module SET version=3, installed=datetime('now') WHERE id='kernel' AND version=2"
-    };
-    for (size_t i = 0; i < sizeof(commands) / sizeof(commands[0]); ++i) {
-      CHECK_EXPECTED(t.execute(commands[i]));
-    }
-
   }
 
   return expected<void>();

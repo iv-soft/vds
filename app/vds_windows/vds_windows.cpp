@@ -5,21 +5,33 @@
 #include "vds_windows.h"
 #include "TrayIcon.h"
 
-void execute_process(const char* process_name) {
+HANDLE execute_process(const char* process_name) {
   DWORD dwType;
   char ui_folder[FILENAME_MAX];
   DWORD cbData = sizeof(ui_folder);
   auto error = RegGetValue(HKEY_CURRENT_USER, "Software\\IVySoft\\VDS", "ui", RRF_RT_REG_SZ, &dwType, ui_folder, &cbData);
   if (ERROR_SUCCESS != error || dwType != REG_SZ) {
-    return;
+    return NULL;
   }
 
   char process_path[FILENAME_MAX];
   if (NULL == PathCombine(process_path, ui_folder, process_name)) {
-    return;
+    return NULL;
   }
 
-  ShellExecute(NULL, NULL, process_path, NULL, ui_folder, SW_SHOWNORMAL);
+  SHELLEXECUTEINFO se;
+  memset(&se, 0, sizeof(se));
+  se.cbSize = sizeof(SHELLEXECUTEINFO);
+  se.fMask = SEE_MASK_NOCLOSEPROCESS;
+  se.lpFile = process_path;
+  se.lpParameters = "";
+  se.lpDirectory = ui_folder;
+  se.nShow = SW_SHOWNORMAL;
+  if (ShellExecuteEx(&se)) {
+    return se.hProcess;
+  }
+
+  return NULL;
 }
 
 
@@ -45,7 +57,7 @@ int APIENTRY _tWinMain(
       return 0;
   }
 
-  execute_process("IVySoft.VDS.Client.AutoUpdate.exe");
+  TrayIcon::hAutoUpdateProcess = execute_process("IVySoft.VDS.Client.AutoUpdate.exe");
 
   TrayIcon trayMenu;
   if(!trayMenu.create(hInstance)) {

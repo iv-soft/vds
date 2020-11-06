@@ -14,20 +14,20 @@ namespace vds {
     class local_data_dbo : public database_table {
     public:
       local_data_dbo()
-          : database_table("local_data_dbo"),
-            storage_id(this, "storage_id"),
-            replica_hash(this, "replica_hash"),
-            replica_size(this, "replica_size"),
-            owner(this, "owner"),
-            storage_path(this, "storage_path"),
-            last_access(this, "last_access") {
+      : database_table("local_data_dbo"),
+        storage_id(this, "storage_id"),
+        replica_hash(this, "replica_hash"),
+        replica_size(this, "replica_size"),
+        owner(this, "owner"),
+        replica_data(this, "replica_data"),
+        last_access(this, "last_access") {
       }
 
       database_column<const_data_buffer, std::string> storage_id;
       database_column<const_data_buffer, std::string> replica_hash;
       database_column<size_t, int64_t> replica_size;
       database_column<const_data_buffer, std::string> owner;
-      database_column<std::string> storage_path;
+      database_column<const_data_buffer> replica_data;
       database_column<std::chrono::system_clock::time_point> last_access;
 
       static constexpr const char* create_table =
@@ -36,7 +36,7 @@ namespace vds {
 			  replica_hash VARCHAR(64) NOT NULL,\
         replica_size INTEGER NOT NULL,\
 			  owner VARCHAR(64) NOT NULL,\
-			  storage_path VARCHAR(256) NOT NULL,\
+        replica_data BLOB NOT NULL,\
         last_access INTEGER NOT NULL,\
         CONSTRAINT pk_local_data_dbo PRIMARY KEY(replica_hash,owner))"
         ;

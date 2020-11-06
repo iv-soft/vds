@@ -68,28 +68,18 @@ namespace vds {
           std::list<std::function<async_task<expected<void>>()>> & final_tasks,
           const const_data_buffer& partner_id);
 
-        static expected<filename> save_data(
+        static expected<bool> save_replica_data(
           const service_provider * sp,
           database_transaction& t,
           const const_data_buffer& data_hash,
           const const_data_buffer& data,
-          const const_data_buffer& owner,
-          const const_data_buffer& value_id,
-          uint16_t replica);
+          const const_data_buffer& owner);
 
         expected<void> save_data(
           const service_provider* sp,
           database_transaction & t,
           const const_data_buffer& data,
           const const_data_buffer& owner);
-
-        static expected<filename> save_data(
-          const service_provider * sp,
-          database_transaction& t,
-          const const_data_buffer& data_hash,
-          const filename & original_file,
-          const const_data_buffer& owner,
-          std::list<std::function<async_task<expected<void>>()>>& final_tasks);
 
         expected<std::vector<vds::const_data_buffer>> save_temp(
           database_transaction& t,
@@ -292,8 +282,7 @@ namespace vds {
           std::vector<const_data_buffer> replicas_hashes);
 
         async_task<expected<const_data_buffer>> restore(
-          std::vector<const_data_buffer> replicas_hashes,
-          std::chrono::steady_clock::time_point start);
+          std::vector<const_data_buffer> replicas_hashes);
 
         expected<client::block_info_t> prepare_restore(
           database_read_transaction & t,

@@ -5,6 +5,7 @@
 
 const TCHAR* TrayIcon::WndClassName = _T("VDS Tray Windows Class");
 const TCHAR* TrayIcon::WndWindowName = _T("VDS Tray Window");
+HANDLE TrayIcon::hAutoUpdateProcess = NULL;
 
 TrayIcon::TrayIcon()
 : logger_(vds::log_level::ll_trace, std::unordered_set<std::string>{"*"})
@@ -176,7 +177,15 @@ LRESULT CALLBACK TrayIcon::WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARA
     break;
   }
   case WM_TIMER: {
-    execute_process("IVySoft.VDS.Client.AutoUpdate.exe");
+    if (NULL != hAutoUpdateProcess
+      && WAIT_TIMEOUT != WaitForSingleObject(hAutoUpdateProcess, 0)) {
+      CloseHandle(hAutoUpdateProcess);
+      hAutoUpdateProcess = NULL;
+    }
+
+    if (NULL == hAutoUpdateProcess) {
+      hAutoUpdateProcess = execute_process("IVySoft.VDS.Client.AutoUpdate.exe");
+    }
     break;
   }
   case WM_CLOSE: {
@@ -190,15 +199,27 @@ LRESULT CALLBACK TrayIcon::WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARA
     // Parse the menu selections:
     switch (wmId)
     {
-    case ID_POPUP_DISK:
-      execute_process("IVySoft.VDS.Client.UI.WPF.Disk.exe");
+    case ID_POPUP_DISK: {
+      auto hProcess = execute_process("IVySoft.VDS.Client.UI.WPF.Disk.exe");
+      if (NULL != hProcess) {
+        CloseHandle(hProcess);
+      }
       break;
-    case ID_POPUP_WALLET:
-      execute_process("IVySoft.VDS.Client.UI.WPF.Wallet.exe");
+    }
+    case ID_POPUP_WALLET: {
+      auto hProcess = execute_process("IVySoft.VDS.Client.UI.WPF.Wallet.exe");
+      if (NULL != hProcess) {
+        CloseHandle(hProcess);
+      }
       break;
-    case ID_POPUP_MESSENGER:
-      execute_process("IVySoft.VDS.Client.UI.WPF.Messager.exe");
+    }
+    case ID_POPUP_MESSENGER: {
+      auto hProcess = execute_process("IVySoft.VDS.Client.UI.WPF.Messager.exe");
+      if (NULL != hProcess) {
+        CloseHandle(hProcess);
+      }
       break;
+    }
     case ID_POPUP_EXIT: {
       PostQuitMessage(0);
       break;

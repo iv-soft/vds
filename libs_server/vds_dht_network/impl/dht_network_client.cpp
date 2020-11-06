@@ -95,10 +95,6 @@ vds::expected<std::vector<vds::const_data_buffer>> vds::dht::network::_client::s
 
   GET_EXPECTED(root_folder, persistence::current_user(this->sp_));
 
-  foldername tmp_folder(root_folder, "tmp");
-  CHECK_EXPECTED(tmp_folder.create());
-
-
   std::vector<const_data_buffer> result(service::GENERATE_HORCRUX);
   for (uint16_t replica = 0; replica < service::GENERATE_HORCRUX; ++replica) {
     binary_serializer s;
@@ -110,18 +106,11 @@ vds::expected<std::vector<vds::const_data_buffer>> vds::dht::network::_client::s
       *replica_size = replica_data.size();
     }
 
-    auto client = this->sp_->get<dht::network::client>();
-
-    auto append_path = base64::from_bytes(replica_hash);
-    str_replace(append_path, '+', '#');
-    str_replace(append_path, '/', '_');
-
-    CHECK_EXPECTED(file::write_all(filename(tmp_folder, append_path), replica_data));
-
     orm::chunk_tmp_data_dbo t1;
     CHECK_EXPECTED(t.execute(
       t1.insert_or_ignore(
         t1.object_id = replica_hash,
+        t1.replica_data = replica_data,
         t1.last_sync = std::chrono::system_clock::now()
       )));
     result[replica] = replica_hash;
@@ -443,14 +432,12 @@ void vds::dht::network::_client::remove_session(
   this->route_.remove_session(session);
 }
 
-vds::expected<vds::filename> vds::dht::network::_client::save_data(
+vds::expected<bool> vds::dht::network::_client::save_replica_data(
   const service_provider * sp,
   database_transaction& t,
   const const_data_buffer& data_hash,
   const const_data_buffer& data,
-  const const_data_buffer& owner,
-  const const_data_buffer& value_id,
-  uint16_t replica) {
+  const const_data_buffer& owner) {
 
   auto client = sp->get<network::client>();
 
@@ -465,153 +452,52 @@ vds::expected<vds::filename> vds::dht::network::_client::save_data(
   }
 
   orm::local_data_dbo t1;
-  orm::node_storage_dbo t2;
   GET_EXPECTED_VALUE(st, t.get_reader(
     t1
-    .select(t1.storage_path, t2.local_path)
-    .inner_join(t2, t2.storage_id == t1.storage_id)
+    .select(t1.replica_data)
     .where(t1.replica_hash == data_hash)));
   GET_EXPECTED_VALUE(st_execute, st.execute());
   if (st_execute) {
-    return filename(foldername(t1.storage_path.get(st)), t2.local_path.get(st));
+    const auto stored_data = t1.replica_data.get(st);
+    if (stored_data != data) {
+      return make_unexpected<std::runtime_error>("Data collusion " + base64::from_bytes(data_hash));
+    }
+    return expected<bool>(false);
   }
 
-  uint64_t allowed_size = 0;
   uint64_t usage_size = 0;
-  std::string local_path;
   const_data_buffer storage_id;
 
+  orm::node_storage_dbo t2;
   GET_EXPECTED_VALUE(st, t.get_reader(
-    t2.select(t2.storage_id, t2.local_path, t2.reserved_size, t2.usage_size)
+    t2.select(t2.storage_id, t2.reserved_size, t2.usage_size)
       .where((t2.usage_type == orm::node_storage_dbo::usage_type_t::share)
         || (t2.usage_type == orm::node_storage_dbo::usage_type_t::exclusive && t2.owner_id == owner))));
   WHILE_EXPECTED (st.execute()) {
     const int64_t size = t2.usage_size.get(st);
-    if (t2.reserved_size.get(st) > size && allowed_size < (t2.reserved_size.get(st) - size)) {
-      allowed_size = (t2.reserved_size.get(st) - size);
-      local_path = t2.local_path.get(st);
-      storage_id = t2.storage_id.get(st);
-      usage_size = size;
-    }
+    storage_id = t2.storage_id.get(st);
+    usage_size = size;
+    break;
   }
   WHILE_EXPECTED_END()
 
-  if (local_path.empty() || allowed_size < data.size()) {
+  if (0 == storage_id.size()) {
     return vds::make_unexpected<std::runtime_error>("No disk space");
   }
-
-  auto append_path = base64::from_bytes(data_hash);
-  str_replace(append_path, '+', '#');
-  str_replace(append_path, '/', '_');
-
-  foldername fl(local_path);
-  CHECK_EXPECTED(fl.create());
-
-  fl = foldername(fl, append_path.substr(0, 10));
-  CHECK_EXPECTED(fl.create());
-
-  fl = foldername(fl, append_path.substr(10, 10));
-  CHECK_EXPECTED(fl.create());
-
-  filename fn(fl, append_path.substr(20));
-  CHECK_EXPECTED(file::write_all(fn, data));
 
   CHECK_EXPECTED(t.execute(t1.insert(
     t1.storage_id = storage_id,
     t1.replica_hash = data_hash,
     t1.replica_size = data.size(),
     t1.owner = owner,
-    t1.storage_path = append_path.substr(0, 10) + "/" + append_path.substr(10, 10) + "/" + append_path.substr(20),
+    t1.replica_data = data,
     t1.last_access = std::chrono::system_clock::now())));
 
   CHECK_EXPECTED(t.execute(t2.update(
     t2.usage_size = usage_size + data.size()
   ).where(t2.storage_id == storage_id)));
 
-  return fn;
-}
-
-vds::expected<vds::filename> vds::dht::network::_client::save_data(
-  const service_provider* sp,
-  database_transaction& t,
-  const const_data_buffer& data_hash,
-  const filename& original_file,
-  const const_data_buffer& owner,
-  std::list<std::function<async_task<expected<void>>()>>& final_tasks) {
-  auto client = sp->get<network::client>();
-
-  orm::local_data_dbo t1;
-  orm::node_storage_dbo t2;
-  GET_EXPECTED(st, t.get_reader(
-    t1
-    .select(t1.storage_path, t2.local_path)
-    .inner_join(t2, t2.storage_id == t1.storage_id)
-    .where(t1.replica_hash == data_hash)));
-  GET_EXPECTED(st_execute, st.execute());
-  if (st_execute) {
-    return filename(foldername(t1.storage_path.get(st)), t2.local_path.get(st));
-  }
-
-  uint64_t allowed_size = 0;
-  uint64_t usage_size;
-  std::string local_path;
-  const_data_buffer storage_id;
-
-  GET_EXPECTED_VALUE(st, t.get_reader(
-    t2.select(t2.storage_id, t2.local_path, t2.reserved_size, t2.usage_size)
-    .where((t2.usage_type == orm::node_storage_dbo::usage_type_t::share)
-      || (t2.usage_type == orm::node_storage_dbo::usage_type_t::exclusive && t2.owner_id == owner))
-    ));
-  WHILE_EXPECTED(st.execute()) {
-    const int64_t size = t2.usage_size.get(st);
-    if (t2.reserved_size.get(st) > size&& allowed_size < (t2.reserved_size.get(st) - size)) {
-      allowed_size = (t2.reserved_size.get(st) - size);
-      local_path = t2.local_path.get(st);
-      storage_id = t2.storage_id.get(st);
-      usage_size = size;
-    }
-  }
-  WHILE_EXPECTED_END()
-
-  GET_EXPECTED(size, file::length(original_file));
-  if (local_path.empty() || allowed_size < size) {
-    return vds::make_unexpected<std::runtime_error>("No disk space");
-  }
-
-  auto append_path = base64::from_bytes(data_hash);
-  str_replace(append_path, '+', '#');
-  str_replace(append_path, '/', '_');
-
-  foldername fl(local_path);
-  CHECK_EXPECTED(fl.create());
-
-  fl = foldername(fl, append_path.substr(0, 10));
-  CHECK_EXPECTED(fl.create());
-
-  fl = foldername(fl, append_path.substr(10, 10));
-  CHECK_EXPECTED(fl.create());
-
-  filename fn(fl, append_path.substr(20));
-  CHECK_EXPECTED(file::copy(original_file, fn, true));
-
-  final_tasks.push_back([original_file]() -> async_task<expected<void>> {
-    CHECK_EXPECTED(file::delete_file(original_file));
-    return expected<void>();
-  });
-
-  CHECK_EXPECTED(t.execute(t1.insert(
-    t1.storage_id = storage_id,
-    t1.replica_hash = data_hash,
-    t1.replica_size = size,
-    t1.owner = owner,
-    t1.storage_path = append_path.substr(0, 10) + "/" + append_path.substr(10, 10) + "/" + append_path.substr(20),
-    t1.last_access = std::chrono::system_clock::now())));
-
-  CHECK_EXPECTED(t.execute(t2.update(
-    t2.usage_size = usage_size + size
-  ).where(t2.storage_id == storage_id)));
-
-  return fn;
+  return expected<bool>(true);
 }
 
 vds::expected<void> vds::dht::network::_client::save_data(
@@ -626,73 +512,7 @@ vds::expected<void> vds::dht::network::_client::save_data(
     CHECK_EXPECTED(this->generators_.find(replica)->second->write(s, data.data(), data.size()));
     const auto replica_data = s.move_data();
     GET_EXPECTED(replica_hash, hash::signature(hash::sha256(), replica_data));
-
-    orm::local_data_dbo t1;
-    orm::node_storage_dbo t2;
-    GET_EXPECTED(st, t.get_reader(
-      t1
-      .select(t1.storage_path, t2.local_path)
-      .inner_join(t2, t2.storage_id == t1.storage_id)
-      .where(t1.replica_hash == replica_hash)));
-    GET_EXPECTED(st_execute, st.execute());
-    if (st_execute) {
-      continue;//exist already
-    }
-
-    uint64_t allowed_size = 0;
-    uint64_t usage_size;
-    std::string local_path;
-    const_data_buffer storage_id;
-
-    db_value<int64_t> data_size;
-    GET_EXPECTED_VALUE(st, t.get_reader(
-      t2.select(t2.storage_id, t2.local_path, t2.reserved_size, t2.usage_size)
-      .where((t2.usage_type == orm::node_storage_dbo::usage_type_t::share)
-        || (t2.usage_type == orm::node_storage_dbo::usage_type_t::exclusive && t2.owner_id == owner))
-      ));
-    WHILE_EXPECTED(st.execute()) {
-      const int64_t size = t2.usage_size.get(st);
-      if (t2.reserved_size.get(st) > size && allowed_size < (t2.reserved_size.get(st) - size)) {
-        allowed_size = (t2.reserved_size.get(st) - size);
-        local_path = t2.local_path.get(st);
-        storage_id = t2.storage_id.get(st);
-        usage_size = size;
-      }
-    }
-    WHILE_EXPECTED_END()
-
-    if (local_path.empty() || allowed_size < replica_data.size()) {
-      return vds::make_unexpected<std::runtime_error>("No disk space");
-    }
-
-    auto append_path = base64::from_bytes(replica_hash);
-    str_replace(append_path, '+', '#');
-    str_replace(append_path, '/', '_');
-
-    foldername fl(local_path);
-    CHECK_EXPECTED(fl.create());
-
-    fl = foldername(fl, append_path.substr(0, 10));
-    CHECK_EXPECTED(fl.create());
-
-    fl = foldername(fl, append_path.substr(10, 10));
-    CHECK_EXPECTED(fl.create());
-
-    filename fn(fl, append_path.substr(20));
-    CHECK_EXPECTED(file::write_all(fn, replica_data));
-
-    CHECK_EXPECTED(t.execute(t1.insert(
-      t1.storage_id = storage_id,
-      t1.replica_hash = replica_hash,
-      t1.replica_size = replica_data.size(),
-      t1.owner = owner,
-      t1.storage_path = append_path.substr(0, 10) + "/" + append_path.substr(10, 10) + "/" + append_path.substr(20),
-      t1.last_access = std::chrono::system_clock::now())));
-
-    CHECK_EXPECTED(t.execute(t2.update(
-      t2.usage_size = usage_size + replica_data.size()
-    ).where(t2.storage_id == storage_id)));
-
+    CHECK_EXPECTED(this->save_replica_data(sp, t, replica_hash, replica_data, owner));
   }
 
   return expected<void>();
@@ -855,25 +675,18 @@ vds::async_task<vds::expected<uint8_t>> vds::dht::network::_client::prepare_rest
 }
 
 vds::async_task<vds::expected<vds::const_data_buffer>> vds::dht::network::_client::restore(
-  std::vector<const_data_buffer> replicas_hashes,
-  std::chrono::steady_clock::time_point start) {
+  std::vector<const_data_buffer> replicas_hashes) {
   auto result = std::make_shared<const_data_buffer>();
-    for (;;) {
-    uint8_t progress;
-    GET_EXPECTED_VALUE_ASYNC(progress, co_await this->restore_async(
-      replicas_hashes,
-      result));
+  uint8_t progress;
+  GET_EXPECTED_VALUE_ASYNC(progress, co_await this->restore_async(
+    replicas_hashes,
+    result));
 
-    if (result->size() > 0) {
-      co_return *result;
-    }
-
-    if (std::chrono::seconds(60) < (std::chrono::steady_clock::now() - start)) {
-      co_return vds::make_unexpected<vds_exceptions::not_found>();
-    }
-
-    std::this_thread::sleep_for(std::chrono::seconds(5));
+  if (result->size() > 0) {
+    co_return *result;
   }
+
+  co_return vds::make_unexpected<vds_exceptions::not_found>();
 }
 
 vds::expected<vds::dht::network::client::block_info_t> vds::dht::network::_client::prepare_restore(
@@ -902,18 +715,16 @@ vds::expected<void> vds::dht::network::_client::restore_async(
   std::vector<const_data_buffer> datas;
   std::map<uint16_t, const_data_buffer> unknonw_replicas;
 
-  orm::node_storage_dbo t1;
   orm::local_data_dbo t4;
   for (uint16_t replica = 0; replica < service::GENERATE_HORCRUX; ++replica) {
     GET_EXPECTED(st, t.get_reader(
-      t1
-      .select(t1.local_path, t4.storage_path)
-      .inner_join(t4, t4.storage_id == t1.storage_id)
+      t4
+      .select(t4.replica_data)
       .where(t4.replica_hash == replicas_hashes[replica])));
     GET_EXPECTED(st_execute, st.execute());
     if (st_execute) {
       replicas.push_back(replica);
-      GET_EXPECTED(data, file::read_all(filename(foldername(t1.local_path.get(st)), t4.storage_path.get(st))));
+      const auto data = t4.replica_data.get(st);
       datas.push_back(data);
 
       if (replicas.size() >= service::MIN_HORCRUX) {
@@ -1121,14 +932,9 @@ vds::expected<void> vds::dht::network::client::load_keys(
       t1.private_key = node_key_der)));
 
     //default storage
-    GET_EXPECTED(root_folder, persistence::current_user(sp));
-    foldername folder(root_folder, "storage");
-    CHECK_EXPECTED(folder.create());
-
     binary_serializer s;
     CHECK_EXPECTED(s << key_id);
     CHECK_EXPECTED(s << keys_control::root_id());
-    CHECK_EXPECTED(s << folder.full_name());
 
     GET_EXPECTED(storage_id, hash::signature(hash::sha256(), s.move_data()));
 
@@ -1136,7 +942,6 @@ vds::expected<void> vds::dht::network::client::load_keys(
     return t.execute(
       t1.insert(
         t1.storage_id = storage_id,
-        t1.local_path = folder.full_name(),
         t1.owner_id = keys_control::root_id(),
         t1.reserved_size = 1024ul * 1024ul * 1024ul,
         t1.usage_type = orm::node_storage_dbo::usage_type_t::share));
@@ -1229,29 +1034,22 @@ vds::expected<vds::const_data_buffer> vds::dht::network::client::save(
   CHECK_EXPECTED(log_block.walk_messages(
     [&t, sp, &processed, &final_tasks](const transactions::store_block_transaction& message)->expected<bool> {
       auto client = sp->get<dht::network::client>();
-      GET_EXPECTED(root_folder, persistence::current_user(sp));
-      foldername tmp_folder(root_folder, "tmp");
 
       for (const auto& p : message.replicas) {
         if (processed.end() == processed.find(p)) {
           processed.emplace(p);
 
           orm::chunk_tmp_data_dbo t1;
-          GET_EXPECTED(st, t.get_reader(t1.select(t1.object_id).where(t1.object_id == p)));
+          GET_EXPECTED(st, t.get_reader(t1.select(t1.replica_data).where(t1.object_id == p)));
           GET_EXPECTED(st_execute, st.execute());
           if (st_execute) {
-            auto append_path = base64::from_bytes(p);
-            str_replace(append_path, '+', '#');
-            str_replace(append_path, '/', '_');
-
-            filename fn(tmp_folder, append_path);
-            CHECK_EXPECTED((*client)->save_data(
+            const auto replica_data = t1.replica_data.get(st);
+            CHECK_EXPECTED((*client)->save_replica_data(
               sp,
               t,
               p,
-              fn,
-              message.owner_id,
-              final_tasks));
+              replica_data,
+              message.owner_id));
 
             CHECK_EXPECTED(t.execute(t1.delete_if(t1.object_id == p)));
           }
@@ -1380,7 +1178,7 @@ vds::async_task<vds::expected<uint8_t>> vds::dht::network::client::prepare_resto
 vds::async_task<vds::expected<vds::const_data_buffer>> vds::dht::network::client::restore(
   std::vector<const_data_buffer> object_ids)
 {
-  return this->impl_->restore(std::move(object_ids), std::chrono::steady_clock::now());
+  return this->impl_->restore(std::move(object_ids));
 }
 
 vds::expected<vds::dht::network::client::block_info_t> vds::dht::network::client::prepare_restore(

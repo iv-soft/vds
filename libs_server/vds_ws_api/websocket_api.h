@@ -8,6 +8,7 @@ All rights reserved
 
 #include "http_request.h"
 #include "http_response.h"
+#include "node_storage_dbo.h"
 
 namespace vds {
   class websocket_output;
@@ -104,7 +105,8 @@ namespace vds {
       const vds::service_provider* sp,
       std::shared_ptr<json_object> result,
       asymmetric_public_key user_public_key,
-      foldername folder);
+      size_t size,
+      orm::node_storage_dbo::usage_type_t usage_type);
 
     async_task<expected<void>> looking_block(
       const vds::service_provider* sp,
