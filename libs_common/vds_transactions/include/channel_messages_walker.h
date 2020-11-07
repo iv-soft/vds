@@ -115,15 +115,16 @@ namespace vds {
         : public channel_messages_walker_lambdas<handler_types...>
     {
       using base_class = channel_messages_walker_lambdas<handler_types...>;
+      using message_type = std::tuple_element_t<0, typename functor_info<first_handler_type>::arguments_tuple>;
     public:
       channel_messages_walker_lambdas(
         first_handler_type&& first_handler,
         handler_types && ... handler)
         : base_class(std::forward<handler_types>(handler)...) {
-        this->set_handler(std::tuple_element_t<0, typename functor_info<first_handler_type>::arguments_tuple>::message_id, [handler = std::move(first_handler)](
+        this->set_handler(message_type::message_id, [handler = std::move(first_handler)](
           binary_deserializer& s,
           const message_environment_t& message_environment) {
-            GET_EXPECTED(message, message_deserialize<typename std::tuple_element_t<0, typename functor_info<first_handler_type>::arguments_tuple>>(s));
+            GET_EXPECTED(message, message_deserialize<message_type>(s));
             return handler(message, message_environment);
           });
       }
