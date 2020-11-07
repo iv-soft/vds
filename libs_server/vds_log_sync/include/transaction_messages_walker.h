@@ -76,7 +76,7 @@ namespace vds {
       lambda_holder_t<expected<bool>, binary_deserializer& /*s*/> handler_;
     };
 
-    class transaction_messages_walker : public transaction_messages_walker_base<std::tuple_size<message_types>::value> {
+    class transaction_messages_walker : public transaction_messages_walker_base<std::tuple_size<transaction_types>::value> {
     public:
       expected<bool> process(const const_data_buffer & message_data) {
         binary_deserializer s(message_data);
