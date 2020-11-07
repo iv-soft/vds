@@ -16,44 +16,68 @@ All rights reserved
 namespace vds {
   namespace transactions {
 
-    class transaction_messages_walker {
+    typedef std::tuple<
+      payment_transaction,
+      payment_request_transaction,
+      asset_issue_transaction,
+      channel_message,
+      create_user_transaction,
+      node_add_transaction,
+      create_wallet_transaction,
+      store_block_transaction,
+
+      host_block_transaction,
+      host_delete_block_transaction
+    > transaction_types;
+
+    template<size_t index>
+    class transaction_messages_walker_base;
+
+    template<>
+    class transaction_messages_walker_base<0> {
+    protected:
+      expected<bool> visit(transaction_id message_id, binary_deserializer& s) {
+        return vds::make_unexpected<std::runtime_error>("Invalid transaction " + std::to_string((uint8_t)message_id));
+      }
+
+      void set_handler(transaction_id message_id, lambda_holder_t<expected<bool>, binary_deserializer& /*s*/>&& handler) {
+        assert(false);
+        //return vds::make_unexpected<std::runtime_error>("Invalid transaction " + std::to_string((uint8_t)message_id));
+      }
+    };
+
+    template<size_t index>
+    class transaction_messages_walker_base : public transaction_messages_walker_base<index - 1> {
+    protected:
+      using message_type = typename std::remove_const<typename std::remove_reference<std::tuple_element_t<index - 1, transaction_types>>::type>::type;
+
+      expected<bool> visit(transaction_id message_id, binary_deserializer& s) {
+        if (message_id == message_type::message_id) {
+          if (!this->handler_) {
+            GET_EXPECTED(message, message_deserialize<message_type>(s));
+            return expected<bool>(true);
+          }
+          return this->handler_(s);
+        }
+
+        return transaction_messages_walker_base<index - 1>::visit(message_id, s);
+      }
+
+      void set_handler(transaction_id message_id, lambda_holder_t<expected<bool>, binary_deserializer& /*s*/>&& handler) {
+        if (message_id == message_type::message_id) {
+          this->handler_ = std::move(handler);
+          return;
+        }
+
+        transaction_messages_walker_base<index - 1>::set_handler(message_id, std::move(handler));
+      }
+
+    private:
+      lambda_holder_t<expected<bool>, binary_deserializer& /*s*/> handler_;
+    };
+
+    class transaction_messages_walker : public transaction_messages_walker_base<std::tuple_size<message_types>::value> {
     public:
-      virtual expected<bool> visit(const payment_transaction &/*message*/) {
-        return true;
-      }
-
-      virtual expected<bool> visit(const channel_message & /*message*/) {
-        return true;
-      }
-
-      virtual expected<bool> visit(const create_user_transaction & /*message*/) {
-        return true;
-      }
-
-      virtual expected<bool> visit(const node_add_transaction & /*message*/) {
-        return true;
-      }
-
-      virtual expected<bool> visit(const create_wallet_transaction & /*message*/) {
-        return true;
-      }
-
-      virtual expected<bool> visit(const asset_issue_transaction & /*message*/) {
-        return true;
-      }
-
-      virtual expected<bool> visit(const store_block_transaction & /*message*/) {
-        return true;
-      }
-
-      virtual expected<bool> visit(const host_block_transaction& /*message*/) {
-        return true;
-      }
-
-      virtual expected<bool> visit(const host_delete_block_transaction& /*message*/) {
-        return true;
-      }
-
       expected<bool> process(const const_data_buffer & message_data) {
         binary_deserializer s(message_data);
 
@@ -61,82 +85,9 @@ namespace vds {
           uint8_t message_id;
           CHECK_EXPECTED(s >> message_id);
 
-          switch ((transaction_id) message_id) {
-            case transactions::payment_transaction::message_id: {
-              GET_EXPECTED(message, message_deserialize<payment_transaction>(s));
-              GET_EXPECTED(result, this->visit(message));
-              if (!result) {
-                return false;
-              }
-              break;
-            }
-            case transactions::create_user_transaction::message_id: {
-              GET_EXPECTED(message, message_deserialize<create_user_transaction>(s));
-              GET_EXPECTED(result, this->visit(message));
-              if (!result) {
-                return false;
-              }
-              break;
-            }
-            case transactions::channel_message::message_id: {
-              GET_EXPECTED(message, message_deserialize<channel_message>(s));
-              GET_EXPECTED(result, this->visit(message));
-              if (!result) {
-                return false;
-              }
-              break;
-            }
-            case transactions::node_add_transaction::message_id: {
-              GET_EXPECTED(message, message_deserialize<node_add_transaction>(s));
-              GET_EXPECTED(result, this->visit(message));
-              if (!result) {
-                return false;
-              }
-              break;
-            }
-            case transactions::create_wallet_transaction::message_id: {
-              GET_EXPECTED(message, message_deserialize<create_wallet_transaction>(s));
-              GET_EXPECTED(result, this->visit(message));
-              if (!result) {
-                return false;
-              }
-              break;
-            }
-            case transactions::asset_issue_transaction::message_id: {
-              GET_EXPECTED(message, message_deserialize<asset_issue_transaction>(s));
-              GET_EXPECTED(result, this->visit(message));
-              if (!result) {
-                return false;
-              }
-              break;
-            }
-            case transactions::store_block_transaction::message_id: {
-              GET_EXPECTED(message, message_deserialize<store_block_transaction>(s));
-              GET_EXPECTED(result, this->visit(message));
-              if (!result) {
-                return false;
-              }
-              break;
-            }
-            case transactions::host_block_transaction::message_id: {
-              GET_EXPECTED(message, message_deserialize<host_block_transaction>(s));
-              GET_EXPECTED(result, this->visit(message));
-              if (!result) {
-                return false;
-              }
-              break;
-            }
-            case transactions::host_delete_block_transaction::message_id: {
-              GET_EXPECTED(message, message_deserialize<host_delete_block_transaction>(s));
-              GET_EXPECTED(result, this->visit(message));
-              if (!result) {
-                return false;
-              }
-              break;
-            }
-            default: {
-              return vds::make_unexpected<std::runtime_error>("Invalid message " + std::to_string(message_id));
-            }
+          GET_EXPECTED(result, this->visit((transaction_id)message_id, s));
+          if (!result) {
+            return false;
           }
         }
 
@@ -161,20 +112,18 @@ namespace vds {
         : public transaction_messages_walker_lambdas<handler_types...>
     {
       using base_class = transaction_messages_walker_lambdas<handler_types...>;
+      using message_type = typename std::remove_const<typename std::remove_reference<std::tuple_element_t<0, typename functor_info<first_handler_type>::arguments_tuple>>::type>::type;
     public:
       transaction_messages_walker_lambdas(
           first_handler_type && first_handler,
           handler_types && ... handler)
-      : base_class(std::forward<handler_types>(handler)...),
-        first_handler_(std::forward<first_handler_type>(first_handler)) {
+      : base_class(std::forward<handler_types>(handler)...) {
+        this->set_handler(message_type::message_id, [handler = std::forward<first_handler_type>(first_handler)](
+          binary_deserializer& s) -> expected<bool> {
+          GET_EXPECTED(message, message_deserialize<message_type>(s));
+          return handler(message);
+        });
       }
-
-      expected<bool> visit(const typename functor_info<first_handler_type>::argument_type & message) override {
-        return this->first_handler_(message);
-      }
-
-    private:
-      first_handler_type first_handler_;
     };
   }
 }

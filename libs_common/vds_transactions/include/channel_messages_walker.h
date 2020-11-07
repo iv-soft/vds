@@ -24,11 +24,12 @@ namespace vds {
     };
 
     typedef std::tuple<
-      channel_add_reader_transaction,
-      channel_add_writer_transaction,
-      channel_create_transaction,
       user_message_transaction,
-      control_message_transaction
+      channel_create_transaction,
+      channel_add_writer_transaction,
+      channel_add_reader_transaction,
+      control_message_transaction,
+      create_wallet_message
     > message_types;
 
     template<size_t index>
@@ -41,15 +42,16 @@ namespace vds {
         return vds::make_unexpected<std::runtime_error>("Invalid channel message " + std::to_string((uint8_t)message_id));
       }
 
-      expected<void> set_handler(channel_message_id message_id, lambda_holder_t<expected<bool>, binary_deserializer& /*s*/, const message_environment_t& /*message_environment*/> && handler) {
-        return vds::make_unexpected<std::runtime_error>("Invalid channel message " + std::to_string((uint8_t)message_id));
+      void set_handler(channel_message_id message_id, lambda_holder_t<expected<bool>, binary_deserializer& /*s*/, const message_environment_t& /*message_environment*/> && handler) {
+        assert(false);
+        //return vds::make_unexpected<std::runtime_error>("Invalid channel message " + std::to_string((uint8_t)message_id));
       }
     };
 
     template<size_t index>
     class channel_messages_walker_base : public channel_messages_walker_base<index - 1> {
     protected:
-      using message_type = std::tuple_element_t<index - 1, message_types>;
+      using message_type = typename std::remove_const<typename std::remove_reference<std::tuple_element_t<index - 1, message_types>>::type>::type;
 
       expected<bool> visit(channel_message_id message_id, binary_deserializer& s, const message_environment_t& message_environment) {
         if (message_id == message_type::message_id) {
@@ -63,13 +65,13 @@ namespace vds {
         return channel_messages_walker_base<index - 1>::visit(message_id, s, message_environment);
       }
 
-      expected<void> set_handler(channel_message_id message_id, lambda_holder_t<expected<bool>, binary_deserializer& /*s*/, const message_environment_t& /*message_environment*/>&& handler) {
+      void set_handler(channel_message_id message_id, lambda_holder_t<expected<bool>, binary_deserializer& /*s*/, const message_environment_t& /*message_environment*/>&& handler) {
         if (message_id == message_type::message_id) {
           this->handler_ = std::move(handler);
-          return expected<void>();
+          return;
         }
 
-        return channel_messages_walker_base<index - 1>::set_handler(message_id, s, std::move(handler));
+        channel_messages_walker_base<index - 1>::set_handler(message_id, std::move(handler));
       }
 
     private:
@@ -115,15 +117,15 @@ namespace vds {
         : public channel_messages_walker_lambdas<handler_types...>
     {
       using base_class = channel_messages_walker_lambdas<handler_types...>;
-      using message_type = std::tuple_element_t<0, typename functor_info<first_handler_type>::arguments_tuple>;
+      using message_type = typename std::remove_const<typename std::remove_reference<std::tuple_element_t<0, typename functor_info<first_handler_type>::arguments_tuple>>::type>::type;
     public:
       channel_messages_walker_lambdas(
         first_handler_type&& first_handler,
         handler_types && ... handler)
         : base_class(std::forward<handler_types>(handler)...) {
-        this->set_handler(message_type::message_id, [handler = std::move(first_handler)](
+        this->set_handler(message_type::message_id, [handler = std::forward<first_handler_type>(first_handler)](
           binary_deserializer& s,
-          const message_environment_t& message_environment) {
+          const message_environment_t& message_environment) -> expected<bool> {
             GET_EXPECTED(message, message_deserialize<message_type>(s));
             return handler(message, message_environment);
           });

@@ -8,17 +8,17 @@ All rights reserved
 namespace vds {
   namespace transactions {
     enum class channel_message_id : uint8_t {
-      user_channel_create_transaction = 'u',
+      //user_channel_create_transaction = 'u',
       user_message_transaction = 'a',
       //device_user_add_transaction = 'd',
       //create_channel_transaction = 'p',
-      channel_message_transaction = 'm',
+      //channel_message_transaction = 'm',
       channel_create_transaction = 'n',
       channel_add_writer_transaction = 'w',
       channel_add_reader_transaction = 'r',
-      channel_remove_reader_transaction = 'e',
+      //channel_remove_reader_transaction = 'e',
 
-      split_block_transaction = 's',
+      //split_block_transaction = 's',
 
       control_message_transaction = 'c',
       create_wallet_message = 'l',
