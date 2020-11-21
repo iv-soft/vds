@@ -83,6 +83,8 @@ vds::_server::~_server()
 vds::expected<void> vds::_server::start(const service_provider* sp)
 {
   this->sp_ = sp;
+  this->quos_queue_ = std::make_shared<dht::network::quos_queue<bool>>(sp);
+
   CHECK_EXPECTED(this->db_model_->start(sp));
   this->transaction_log_sync_process_.reset(new transaction_log::sync_process(sp));
 
@@ -116,6 +118,7 @@ vds::expected<void> vds::_server::stop()
 vds::async_task<vds::expected<void>> vds::_server::prepare_to_stop() {
   CHECK_EXPECTED_ASYNC(co_await this->dht_network_service_->prepare_to_stop());
   CHECK_EXPECTED_ASYNC(co_await this->db_model_->prepare_to_stop());
+  CHECK_EXPECTED_ASYNC(co_await this->quos_queue_->prepare_to_stop());
   co_return expected<void>();
 }
 

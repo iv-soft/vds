@@ -9,6 +9,7 @@ All rights reserved
 #include "server.h"
 #include "debug_mutex.h"
 #include "imessage_map.h"
+#include <qos_queue.h>
 
 namespace vds {
   namespace transaction_log {
@@ -89,6 +90,11 @@ namespace vds {
     std::unique_ptr<dht::network::service> dht_network_service_;
 
     std::shared_ptr<transaction_log::sync_process> transaction_log_sync_process_;
+
+    std::shared_ptr<dht::network::quos_queue<bool>> quos_queue_;
+
+    vds::async_task<vds::expected<bool>> do_process_message(
+      message_info_t message_info);
   };
 }
 

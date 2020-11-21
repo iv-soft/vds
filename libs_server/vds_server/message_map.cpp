@@ -23,8 +23,17 @@
       }));\
       break;\
     }
-
 vds::async_task<vds::expected<bool>> vds::_server::process_message(
+  message_info_t message_info) {
+  if (this->sp_->get_shutdown_event().is_shuting_down()) {
+    return vds::expected<bool>(false);
+  }
+  return this->quos_queue_->invoke(is_high_priority(message_info.message_type()), [pthis = this->shared_from_this(), message_info]()->async_task<expected<bool>>{
+    return pthis->do_process_message(message_info);
+  });
+}
+
+vds::async_task<vds::expected<bool>> vds::_server::do_process_message(
   message_info_t message_info) {
 
   if(this->sp_->get_shutdown_event().is_shuting_down()) {

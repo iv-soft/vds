@@ -71,6 +71,12 @@ namespace vds {
         //sync_replica_query_operations_request
 
       };
+      inline bool is_high_priority(message_type_t message_type) {
+        return
+          message_type_t::transaction_log_state == message_type
+          || message_type_t::transaction_log_request == message_type
+          || message_type_t::transaction_log_record == message_type;
+      }
     }
 
     namespace messages {
