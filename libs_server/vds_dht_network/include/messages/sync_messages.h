@@ -27,6 +27,23 @@ namespace vds {
         }
       };
 
+      /**
+     * \brief Replica data request from outside object's consensus
+     */
+      class high_priority_replica_request {
+      public:
+        static const network::message_type_t message_id = network::message_type_t::high_priority_replica_request;
+
+        const_data_buffer object_id;
+
+        template <typename visitor_type>
+        auto& visit(visitor_type& v) {
+          return v(
+            this->object_id
+          );
+        }
+      };
+
   //    /**
   //     * \brief Base class to message from leader
   //     */
@@ -318,6 +335,23 @@ namespace vds {
 
         template <typename visitor_type>
         auto & visit(visitor_type & v) {
+          return v(
+            object_id,
+            data,
+            owner);
+        }
+      };
+
+      class high_priority_replica_data {
+      public:
+        static const network::message_type_t message_id = network::message_type_t::high_priority_replica_data;
+
+        const_data_buffer object_id;
+        const_data_buffer data;
+        const_data_buffer owner;
+
+        template <typename visitor_type>
+        auto& visit(visitor_type& v) {
           return v(
             object_id,
             data,

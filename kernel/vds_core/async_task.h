@@ -101,7 +101,7 @@ namespace vds {
   };
 
   template <typename result_type>
-  class _async_task_state : public std::enable_shared_from_this<_async_task_state<result_type>> {
+  class _async_task_state {
   public:
     _async_task_state() {
     }
@@ -153,7 +153,7 @@ namespace vds {
 
 		  auto mt = imt_service::get_current();
 		  if (nullptr != mt) {
-			  mt->do_async([f = std::move(this->then_function_), pthis = this->shared_from_this()]() {
+			  mt->do_async([f = std::move(this->then_function_)]() {
 						f();
 			  });
 		  }
@@ -170,7 +170,7 @@ namespace vds {
   };
 
   template <>
-  class _async_task_state<void> : public std::enable_shared_from_this<_async_task_state<void>>{
+  class _async_task_state<void> {
   public:
     template<class _Rep, class _Period>
     std::future_status wait_for(std::chrono::duration<_Rep, _Period> timeout) {
@@ -219,7 +219,7 @@ namespace vds {
 
 		auto mt = imt_service::get_current();
 		if (nullptr != mt) {
-      mt->do_async([f = std::move(this->then_function_), pthis = this->shared_from_this()]() {
+      mt->do_async([f = std::move(this->then_function_)]() {
           f();
       });
     }
@@ -239,32 +239,27 @@ namespace vds {
   template <typename result_type>
   class [[nodiscard]] async_task {
   public:
-    async_task() :this_state_(10) {}
+    async_task() = default;
     async_task(const async_task &) = delete;
-    async_task(async_task&& original) : this_state_(11), state_(std::move(original.state_)) {}
+    async_task(async_task&& original) = default;
 
     async_task(result_type && result)
-      : this_state_(12), state_(std::make_shared<_async_task_state<result_type>>()) {
+      : state_(std::make_shared<_async_task_state<result_type>>()) {
       this->state_->set_value(new _async_task_return_value<result_type>(std::move(result)));
     }
     async_task(unexpected && error)
-    : this_state_(13), state_(std::make_shared<_async_task_state<result_type>>()){
+    : state_(std::make_shared<_async_task_state<result_type>>()){
       this->state_->set_value(new _async_task_return_value<result_type>(std::move(error)));
     }
 
     async_task & operator = (const async_task &) = delete;
-    async_task& operator = (async_task&& original) {
-      this->this_state_ = 14;
-      this->state_ = std::move(original.state_);
-      return *this;
-    }
+    async_task& operator = (async_task&& original) = default;
 
     async_task(const std::shared_ptr<_async_task_state<result_type>> & state)
-    : this_state_(15), state_(state) {
+    : state_(state) {
     }
 
     ~async_task() {
-      this->this_state_ += 10;
     }
 
 	bool has_state() const {
@@ -320,7 +315,6 @@ namespace vds {
     //  });
     //}
   private:
-    int this_state_;
     std::shared_ptr<_async_task_state<result_type>> state_;
   };  
 

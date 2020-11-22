@@ -44,38 +44,19 @@ namespace vds {
         dht_ping,
         dht_pong,
 
-        //sync_new_election_request,
-        //sync_new_election_response,
-
-        //sync_add_message_request,
-
-        //sync_leader_broadcast_request,
-        //sync_leader_broadcast_response,
-
-        //sync_replica_operations_request,
-        //sync_replica_operations_response,
-
-        //sync_looking_storage_request,
-        //sync_looking_storage_response,
-
-        //sync_snapshot_request,
-        //sync_snapshot_response,
-
-        //sync_offer_send_replica_operation_request,
-        //sync_offer_remove_replica_operation_request,
-        //sync_offer_replica_operation_response,
-
         sync_replica_request,
         sync_replica_data,
 
-        //sync_replica_query_operations_request
-
+        high_priority_replica_request,
+        high_priority_replica_data,
       };
       inline bool is_high_priority(message_type_t message_type) {
         return
           message_type_t::transaction_log_state == message_type
           || message_type_t::transaction_log_request == message_type
-          || message_type_t::transaction_log_record == message_type;
+          || message_type_t::transaction_log_record == message_type
+          || message_type_t::high_priority_replica_request == message_type
+          || message_type_t::high_priority_replica_data == message_type;
       }
     }
 
@@ -218,6 +199,8 @@ namespace std {
       //enum2str(sync_offer_remove_replica_operation_request);
       enum2str(sync_replica_request);
       enum2str(sync_replica_data);
+      enum2str(high_priority_replica_request);
+      enum2str(high_priority_replica_data);
       //enum2str(sync_replica_query_operations_request);
     default:
       return "unknown";

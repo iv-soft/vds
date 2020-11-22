@@ -433,6 +433,8 @@ vds::async_task<vds::expected<bool>> mock_sync_server::process_message(
 
       route_client(sync_replica_request)
       route_client(sync_replica_data)
+      route_client(high_priority_replica_request)
+      route_client(high_priority_replica_data)
 
       route_client(sync_replica_query_operations_request)
 

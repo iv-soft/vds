@@ -77,16 +77,19 @@ namespace vds {
         //  const chunk_info& block_id);
 
         async_task<expected<uint8_t>> prepare_restore(
-          std::vector<const_data_buffer> object_ids);
+          std::vector<const_data_buffer> object_ids,
+          bool high_priority);
 
         async_task<expected<const_data_buffer>> restore(
-          std::vector<const_data_buffer> object_ids);
+          std::vector<const_data_buffer> object_ids,
+          bool high_priority);
 
 
         expected<block_info_t> prepare_restore(
           database_read_transaction & t,
           std::list<std::function<async_task<expected<void>>()>> & final_tasks,
-          const chunk_info& block_id);
+          const chunk_info& block_id,
+          bool high_priority);
 
         const const_data_buffer& current_node_id() const;
 

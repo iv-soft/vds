@@ -46,7 +46,8 @@ vds::expected<void> vds::dht::network::sync_process::do_sync(
 vds::expected<vds::const_data_buffer> vds::dht::network::sync_process::restore_replica(
   database_transaction& t,
   std::list<std::function<async_task<expected<void>>()>> & final_tasks,
-  const const_data_buffer & replica_hash) {
+  const const_data_buffer & replica_hash,
+  bool high_priority) {
 
   auto client = this->sp_->get<network::client>();
 
@@ -68,25 +69,49 @@ vds::expected<vds::const_data_buffer> vds::dht::network::sync_process::restore_r
         base64::from_bytes(replica_hash).c_str(),
         base64::from_bytes(candidate).c_str());
 
-      final_tasks.push_back([client, candidate, replica_hash]() {
-        return (*client)->send(
-          candidate,
-          message_create<messages::sync_replica_request>(
-            replica_hash));
-      });
+      if (high_priority) {
+        final_tasks.push_back([client, candidate, replica_hash]() {
+          return (*client)->send(
+            candidate,
+            message_create<messages::high_priority_replica_request>(
+              replica_hash));
+          });
+      }
+      else {
+        final_tasks.push_back([client, candidate, replica_hash]() {
+          return (*client)->send(
+            candidate,
+            message_create<messages::sync_replica_request>(
+              replica_hash));
+          });
+      }
     }
   }
   else {
-    final_tasks.push_back([client, replica_hash]() {
-      return (*client)->send_near(
-        replica_hash,
-        1,
-        message_create<messages::sync_replica_request>(
-          replica_hash),
-        [](const dht::dht_route::node& node) -> bool {
-          return node.hops_ == 0;
+    if (high_priority) {
+      final_tasks.push_back([client, replica_hash]() {
+        return (*client)->send_near(
+          replica_hash,
+          1,
+          message_create<messages::high_priority_replica_request>(
+            replica_hash),
+          [](const dht::dht_route::node& node) -> bool {
+            return node.hops_ == 0;
+          });
         });
-    });
+    }
+    else {
+      final_tasks.push_back([client, replica_hash]() {
+        return (*client)->send_near(
+          replica_hash,
+          1,
+          message_create<messages::sync_replica_request>(
+            replica_hash),
+          [](const dht::dht_route::node& node) -> bool {
+            return node.hops_ == 0;
+          });
+        });
+    }
   }
 
   return const_data_buffer();
@@ -95,7 +120,8 @@ vds::expected<vds::const_data_buffer> vds::dht::network::sync_process::restore_r
 vds::expected<bool> vds::dht::network::sync_process::prepare_restore_replica(
   database_read_transaction & t,
   std::list<std::function<async_task<expected<void>>()>> & final_tasks,
-  const const_data_buffer replica_hash) {
+  const const_data_buffer replica_hash,
+  bool high_priority) {
 
   auto client = this->sp_->get<network::client>();
   std::list<uint16_t> replicas;
@@ -125,12 +151,21 @@ vds::expected<bool> vds::dht::network::sync_process::prepare_restore_replica(
       "request %s from %s",
       base64::from_bytes(replica_hash).c_str(),
       base64::from_bytes(candidate).c_str());
-    final_tasks.push_back([client, candidate, replica_hash]() {
-      return (*client)->send(
-        candidate,
-        message_create<messages::sync_replica_request>(
-          replica_hash));
-    });
+    if(high_priority) {
+      final_tasks.push_back([client, candidate, replica_hash]() {
+        return (*client)->send(
+          candidate,
+          message_create<messages::high_priority_replica_request>(
+            replica_hash));
+        });
+    } else {
+      final_tasks.push_back([client, candidate, replica_hash]() {
+        return (*client)->send(
+          candidate,
+          message_create<messages::sync_replica_request>(
+            replica_hash));
+        });
+    }
   }
 
   return false;
@@ -236,6 +271,106 @@ vds::expected<bool> vds::dht::network::sync_process::apply_message(
   return true;
 }
 
+vds::expected<bool> vds::dht::network::sync_process::apply_message(
+  database_transaction& t,
+  std::list<std::function<async_task<expected<void>>()>>& final_tasks,
+  const messages::high_priority_replica_request& message,
+  const imessage_map::message_info_t& message_info) {
+
+  auto client = this->sp_->get<network::client>();
+  this->sp_->get<logger>()->trace(
+    SyncModule,
+    "%s: high priority replica %s request from %s",
+    base64::from_bytes(client->current_node_id()).c_str(),
+    base64::from_bytes(message.object_id).c_str(),
+    base64::from_bytes(message_info.source_node()).c_str());
+
+
+  orm::local_data_dbo t3;
+  orm::chunk_replica_data_dbo t5;
+  GET_EXPECTED(st, t.get_reader(
+    t3
+    .select(t3.replica_data, t3.owner, t5.object_hash, t5.replica)
+    .inner_join(t5, t5.replica_hash == t3.replica_hash)
+    .where(t3.replica_hash == message.object_id)));
+
+  GET_EXPECTED(st_execute, st.execute());
+  if (st_execute) {
+    this->sp_->get<logger>()->trace(
+      SyncModule,
+      "Send high priority replica %s to %s",
+      base64::from_bytes(message.object_id).c_str(),
+      base64::from_bytes(message_info.source_node()).c_str());
+    const auto owner = t3.owner.get(st);
+    const auto object_hash = t5.object_hash.get(st);
+    const auto replica = t5.replica.get(st);
+    const auto data = t3.replica_data.get(st);
+    //TODO: validate data
+    final_tasks.push_back([
+      client,
+        data,
+        target_node = message_info.source_node(),
+        object_id = message.object_id,
+        owner,
+        object_hash,
+        replica
+    ]() {
+        return (*client)->send(
+          target_node,
+          message_create<messages::high_priority_replica_data>(
+            object_id,
+            data,
+            owner,
+            object_hash,
+            replica));
+      });
+  }
+  else {
+    this->sp_->get<logger>()->error(
+      SyncModule,
+      "Not found replica %s requested by %s",
+      base64::from_bytes(message.object_id).c_str(),
+      base64::from_bytes(message_info.source_node()).c_str());
+  }
+
+  return true;
+}
+
+vds::expected<bool> vds::dht::network::sync_process::apply_message(
+  database_transaction& t,
+  std::list<std::function<async_task<expected<void>>()>>& final_tasks,
+  const messages::high_priority_replica_data& message,
+  const imessage_map::message_info_t& message_info) {
+
+  auto client = this->sp_->get<network::client>();
+
+  orm::local_data_dbo t2;
+  GET_EXPECTED(st, t.get_reader(
+    t2.select(t2.replica_hash)
+    .where(t2.replica_hash == message.object_id)));
+  GET_EXPECTED(st_execute, st.execute());
+  if (st_execute) {
+    //Already exists
+    this->sp_->get<logger>()->trace(
+      SyncModule,
+      "High priority replica %s from %s is already exists",
+      base64::from_bytes(message.object_id).c_str(),
+      base64::from_bytes(message_info.source_node()).c_str());
+    return false;
+  }
+
+  GET_EXPECTED(data_hash, hash::signature(hash::sha256(), message.data));
+  vds_assert(data_hash == message.object_id);
+  CHECK_EXPECTED(_client::save_replica_data(this->sp_, t, data_hash, message.data, message.owner));
+  this->sp_->get<logger>()->trace(
+    SyncModule,
+    "Got high priority replica %s from %s",
+    base64::from_bytes(data_hash).c_str(),
+    base64::from_bytes(message_info.source_node()).c_str());
+
+  return true;
+}
+
 vds::expected<void> vds::dht::network::sync_process::sync_replicas(
   database_transaction& t,
   std::list<std::function<async_task<expected<void>>()>> & final_tasks) {
@@ -334,7 +469,7 @@ vds::expected<void> vds::dht::network::sync_process::sync_replicas(
             WHILE_EXPECTED_END()
 
             auto result = std::make_shared<const_data_buffer>();
-            CHECK_EXPECTED((*pclient)->restore_async(t, final_tasks, replicas, result, std::make_shared<uint8_t>()));
+            CHECK_EXPECTED((*pclient)->restore_async(t, final_tasks, replicas, result, std::make_shared<uint8_t>(), false));
             
             if (0 < result->size()) {
               CHECK_EXPECTED((*pclient)->save_data(this->sp_, t, *result, owner));

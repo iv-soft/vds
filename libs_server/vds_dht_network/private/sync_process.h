@@ -20,6 +20,8 @@ namespace vds {
       //class sync_offer_remove_replica_operation_request;
       class sync_replica_data;
       class sync_replica_request;
+      class high_priority_replica_data;
+      class high_priority_replica_request;
       //class sync_replica_operations_response;
       //class sync_replica_operations_request;
       //class sync_leader_broadcast_response;
@@ -63,12 +65,14 @@ namespace vds {
         expected<const_data_buffer> restore_replica(
           database_transaction& t,
           std::list<std::function<async_task<expected<void>>()>> & final_tasks,
-          const const_data_buffer & replica_hash);
+          const const_data_buffer & replica_hash,
+          bool high_priority);
 
         expected<bool> prepare_restore_replica(
           database_read_transaction & t,
           std::list<std::function<async_task<expected<void>>()>> & final_tasks,
-          const_data_buffer object_id);
+          const_data_buffer object_id,
+          bool high_priority);
 
         //expected<bool> apply_message(
         //  database_transaction& t,
@@ -167,6 +171,18 @@ namespace vds {
           database_transaction& t,
           std::list<std::function<async_task<expected<void>>()>> & final_tasks,
           const messages::sync_replica_data& message,
+          const imessage_map::message_info_t& message_info);
+
+        expected<bool> apply_message(
+          database_transaction& t,
+          std::list<std::function<async_task<expected<void>>()>>& final_tasks,
+          const messages::high_priority_replica_request& message,
+          const imessage_map::message_info_t& message_info);
+
+        expected<bool> apply_message(
+          database_transaction& t,
+          std::list<std::function<async_task<expected<void>>()>>& final_tasks,
+          const messages::high_priority_replica_data& message,
           const imessage_map::message_info_t& message_info);
         //
         //expected<bool> apply_message(

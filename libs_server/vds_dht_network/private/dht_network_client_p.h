@@ -26,6 +26,8 @@ namespace vds {
       //class sync_add_message_request;
       class sync_replica_data;
       class sync_replica_request;
+      class high_priority_replica_data;
+      class high_priority_replica_request;
       class dht_pong;
       class dht_ping;
       class transaction_log_record;
@@ -203,6 +205,18 @@ namespace vds {
           const messages::sync_replica_data& message,
           const imessage_map::message_info_t& message_info);
 
+        expected<bool> apply_message(
+          database_transaction& t,
+          std::list<std::function<async_task<expected<void>>()>>& final_tasks,
+          const messages::high_priority_replica_request& message,
+          const imessage_map::message_info_t& message_info);
+
+        expected<bool> apply_message(
+          database_transaction& t,
+          std::list<std::function<async_task<expected<void>>()>>& final_tasks,
+          const messages::high_priority_replica_data& message,
+          const imessage_map::message_info_t& message_info);
+
         //expected<bool> apply_message(
         //  database_transaction& t,
         //  std::list<std::function<async_task<expected<void>>()>> & final_tasks,
@@ -279,18 +293,22 @@ namespace vds {
           uint8_t hops);
 
         async_task<expected<uint8_t>> prepare_restore(
-          std::vector<const_data_buffer> replicas_hashes);
+          std::vector<const_data_buffer> replicas_hashes,
+          bool high_priority);
 
         async_task<expected<const_data_buffer>> restore(
-          std::vector<const_data_buffer> replicas_hashes);
+          std::vector<const_data_buffer> replicas_hashes,
+          bool high_priority);
 
         expected<client::block_info_t> prepare_restore(
           database_read_transaction & t,
           std::list<std::function<async_task<expected<void>>()>> & final_tasks,
-          const std::vector<const_data_buffer>& replicas_hashes);
+          const std::vector<const_data_buffer>& replicas_hashes,
+          bool high_priority);
 
         async_task<vds::expected<uint8_t>> restore_async(
           const std::vector<const_data_buffer>& replicas_hashes,
+          bool high_priority,
           std::shared_ptr<const_data_buffer> result = std::shared_ptr<const_data_buffer>());
 
         void get_route_statistics(route_statistic& result);
@@ -381,7 +399,8 @@ namespace vds {
           std::list<std::function<async_task<expected<void>>()>> & final_tasks,
           const std::vector<const_data_buffer>& object_ids,
           const std::shared_ptr<const_data_buffer>& result,
-          const std::shared_ptr<uint8_t> & result_progress);
+          const std::shared_ptr<uint8_t> & result_progress,
+          bool high_priority);
       };
     }
   }

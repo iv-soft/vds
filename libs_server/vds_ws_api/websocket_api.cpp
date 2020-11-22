@@ -713,7 +713,7 @@ vds::async_task<vds::expected<void>> vds::websocket_api::prepare_download(
   std::vector<const_data_buffer> object_ids)
 {
   auto network_client = sp->get<dht::network::client>();
-  GET_EXPECTED_ASYNC(progress, co_await network_client->prepare_restore(object_ids));
+  GET_EXPECTED_ASYNC(progress, co_await network_client->prepare_restore(object_ids, true));
 
   result->add_property("result", progress);
   co_return expected<void>();
@@ -725,7 +725,7 @@ vds::async_task<vds::expected<void>> vds::websocket_api::download(
   std::vector<const_data_buffer> object_ids)
 {
   auto network_client = sp->get<dht::network::client>();
-  GET_EXPECTED_ASYNC(buffer, co_await network_client->restore(object_ids));
+  GET_EXPECTED_ASYNC(buffer, co_await network_client->restore(object_ids, true));
 
   result->add_property("result", buffer);
   co_return expected<void>();

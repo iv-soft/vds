@@ -174,7 +174,9 @@ vds::expected<vds::orm::transaction_log_record_dbo::state_t> vds::transactions::
       return vds::orm::transaction_log_record_dbo::state_t::validated;
     }
     else {
-      if(safe_cast<uint64_t>(t1.order_no.get(st)) >= block.order_no() || t1.time_point.get(st) > block.time_point()) {
+      const auto order_no = t1.order_no.get(st);
+      const auto time_point = t1.time_point.get(st);
+      if(safe_cast<uint64_t>(order_no) >= block.order_no() || time_point > block.time_point()) {
         state = orm::transaction_log_record_dbo::state_t::invalid;
         vds_assert(false);
       }

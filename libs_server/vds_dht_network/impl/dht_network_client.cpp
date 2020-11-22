@@ -663,6 +663,21 @@ vds::expected<bool> vds::dht::network::_client::apply_message(
   return this->sync_process_.apply_message(t, final_tasks, message, message_info);
 }
 
+vds::expected<bool> vds::dht::network::_client::apply_message(database_transaction& t,
+  std::list<std::function<async_task<expected<void>>()>>& final_tasks,
+  const messages::high_priority_replica_request& message,
+  const imessage_map::message_info_t& message_info) {
+  return this->sync_process_.apply_message(t, final_tasks, message, message_info);
+}
+
+vds::expected<bool> vds::dht::network::_client::apply_message(
+  database_transaction& t,
+  std::list<std::function<async_task<expected<void>>()>>& final_tasks,
+  const messages::high_priority_replica_data& message,
+  const imessage_map::message_info_t& message_info) {
+  return this->sync_process_.apply_message(t, final_tasks, message, message_info);
+}
+
 //vds::expected<bool> vds::dht::network::_client::apply_message( database_transaction& t,
 //  std::list<std::function<async_task<expected<void>>()>> & final_tasks,
 //  const messages::sync_replica_query_operations_request& message, const imessage_map::message_info_t& message_info) {
@@ -670,16 +685,19 @@ vds::expected<bool> vds::dht::network::_client::apply_message(
 //}
 
 vds::async_task<vds::expected<uint8_t>> vds::dht::network::_client::prepare_restore(
-  std::vector<const_data_buffer> replicas_hashes) {
-  return this->restore_async(replicas_hashes);
+  std::vector<const_data_buffer> replicas_hashes,
+  bool high_priority) {
+  return this->restore_async(replicas_hashes, high_priority);
 }
 
 vds::async_task<vds::expected<vds::const_data_buffer>> vds::dht::network::_client::restore(
-  std::vector<const_data_buffer> replicas_hashes) {
+  std::vector<const_data_buffer> replicas_hashes,
+  bool high_priority) {
   auto result = std::make_shared<const_data_buffer>();
   uint8_t progress;
   GET_EXPECTED_VALUE_ASYNC(progress, co_await this->restore_async(
     replicas_hashes,
+    high_priority,
     result));
 
   if (result->size() > 0) {
@@ -692,12 +710,13 @@ vds::async_task<vds::expected<vds::const_data_buffer>> vds::dht::network::_clien
 vds::expected<vds::dht::network::client::block_info_t> vds::dht::network::_client::prepare_restore(
   database_read_transaction & t,
   std::list<std::function<async_task<expected<void>>()>> & final_tasks,
-  const std::vector<const_data_buffer>& object_ids) {
+  const std::vector<const_data_buffer>& object_ids,
+  bool high_priority) {
 
   auto result = vds::dht::network::client::block_info_t();
 
     for (const auto& object_id : object_ids) {
-      GET_EXPECTED(replicas, this->sync_process_.prepare_restore_replica(t, final_tasks, object_id));
+      GET_EXPECTED(replicas, this->sync_process_.prepare_restore_replica(t, final_tasks, object_id, high_priority));
       result.replicas[object_id] = replicas;
     }
 
@@ -709,7 +728,8 @@ vds::expected<void> vds::dht::network::_client::restore_async(
   std::list<std::function<async_task<expected<void>>()>> & final_tasks,
   const std::vector<const_data_buffer>& replicas_hashes,
   const std::shared_ptr<const_data_buffer>& result,
-  const std::shared_ptr<uint8_t> & result_progress) {
+  const std::shared_ptr<uint8_t> & result_progress,
+  bool high_priority) {
   
   std::vector<uint16_t> replicas;
   std::vector<const_data_buffer> datas;
@@ -748,7 +768,7 @@ vds::expected<void> vds::dht::network::_client::restore_async(
 
   *result_progress = 99 * replicas.size() / service::MIN_HORCRUX;
   for (const auto replica : unknonw_replicas) {
-    CHECK_EXPECTED(this->sync_process_.restore_replica(t, final_tasks, replica.second));
+    CHECK_EXPECTED(this->sync_process_.restore_replica(t, final_tasks, replica.second, high_priority));
   }
 
   return expected<void>();
@@ -756,14 +776,15 @@ vds::expected<void> vds::dht::network::_client::restore_async(
 
 vds::async_task<vds::expected<uint8_t>> vds::dht::network::_client::restore_async(
   const std::vector<const_data_buffer>& replicas_hashes,
+  bool high_priority,
   std::shared_ptr<const_data_buffer> result) {
 
   auto result_progress = std::make_shared<uint8_t>();
   std::list<std::function<async_task<expected<void>>()>> final_tasks;
   CHECK_EXPECTED_ASYNC(co_await this->sp_->get<db_model>()->async_transaction(
-    [pthis = this->shared_from_this(), replicas_hashes, result, result_progress, &final_tasks](
+    [pthis = this->shared_from_this(), replicas_hashes, result, result_progress, &final_tasks, high_priority](
       database_transaction& t) -> expected<void> {
-    return pthis->restore_async(t, final_tasks, replicas_hashes, result, result_progress);
+    return pthis->restore_async(t, final_tasks, replicas_hashes, result, result_progress, high_priority);
   }));
 
   while(!final_tasks.empty()) {
@@ -1170,22 +1191,25 @@ vds::expected<vds::const_data_buffer> vds::dht::network::client::save(
 //}
 //
 vds::async_task<vds::expected<uint8_t>> vds::dht::network::client::prepare_restore(
-  std::vector<const_data_buffer> object_ids)
+  std::vector<const_data_buffer> object_ids,
+  bool high_priority)
 {
-  return this->impl_->prepare_restore(std::move(object_ids));
+  return this->impl_->prepare_restore(std::move(object_ids), high_priority);
 }
 
 vds::async_task<vds::expected<vds::const_data_buffer>> vds::dht::network::client::restore(
-  std::vector<const_data_buffer> object_ids)
+  std::vector<const_data_buffer> object_ids,
+  bool high_priority)
 {
-  return this->impl_->restore(std::move(object_ids));
+  return this->impl_->restore(std::move(object_ids), high_priority);
 }
 
 vds::expected<vds::dht::network::client::block_info_t> vds::dht::network::client::prepare_restore(
   database_read_transaction & t,
   std::list<std::function<async_task<expected<void>>()>> & final_tasks,
-  const chunk_info& block_id) {
-  return this->impl_->prepare_restore(t, final_tasks, block_id.object_ids);
+  const chunk_info& block_id,
+  bool high_priority) {
+  return this->impl_->prepare_restore(t, final_tasks, block_id.object_ids, high_priority);
 }
 
 
