@@ -39,7 +39,7 @@ namespace vds {
 
         void stop() override;
 
-        vds::async_task<vds::expected<void>> write_async( const udp_datagram& datagram) override;
+        vds::async_task<vds::expected<void>> write_async(udp_datagram && datagram) override;
         vds::async_task<vds::expected<void>> try_handshake( const std::string& address) override;
         expected<void> broadcast_handshake() override;
 
@@ -61,6 +61,18 @@ namespace vds {
         std::shared_ptr<vds::udp_datagram_writer> writer_;
 
         std::shared_ptr<thread_apartment> send_thread_;
+
+        struct quota_state_t {
+          uint32_t sent_data_;
+          uint32_t send_quota_;
+        };
+
+        std::map<network_address, quota_state_t> quota_states_;
+        std::list<std::pair<udp_datagram, std::shared_ptr<vds::async_result<vds::expected<void>>>>> send_queue_;
+        uint32_t total_sent_;
+        uint32_t prev_sent_;
+        std::mutex send_mutex_;
+
 
 #ifdef _DEBUG
 #ifndef _WIN32

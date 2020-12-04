@@ -348,7 +348,7 @@ vds::async_task<vds::expected<void>> vds::dht::network::dht_datagram_protocol::s
     udp_datagram datagram(this->address_, p->second.data_);
     lock.unlock();
 
-    CHECK_EXPECTED_ASYNC(co_await this->transport_->write_async(datagram));
+    CHECK_EXPECTED_ASYNC(co_await this->transport_->write_async(std::move(datagram)));
   }
   co_return expected<void>();
 }
@@ -642,22 +642,22 @@ vds::async_task<vds::expected<void>> vds::dht::network::dht_datagram_protocol::c
       this->last_processed_ = std::chrono::steady_clock::now();
       lock.unlock();
 
-      this->process_message(
-        message_type,
-        target_node,
-        hops,
-        message).then([pthis = this->shared_from_this(), message_type, target_node, source_node = hops.back(), message_size](expected<bool> is_good) {
-        std::unique_lock<std::mutex> traffic_lock(pthis->traffic_mutex_);
-        if (is_good.has_value() && is_good.value()) {
-          pthis->traffic_[source_node][target_node][message_type].good_count_++;
-          pthis->traffic_[source_node][target_node][message_type].good_traffic_ += message_size;
-        }
-        else {
-          pthis->traffic_[source_node][target_node][message_type].bad_count_++;
-          pthis->traffic_[source_node][target_node][message_type].bad_traffic_ += message_size;
-        }
-        traffic_lock.unlock();
-      });
+      GET_EXPECTED_ASYNC(is_good, co_await this->process_message(
+          message_type,
+          target_node,
+          hops,
+          message));
+
+      std::unique_lock<std::mutex> traffic_lock(this->traffic_mutex_);
+      if (is_good) {
+        this->traffic_[hops.back()][target_node][message_type].good_count_++;
+        this->traffic_[hops.back()][target_node][message_type].good_traffic_ += message_size;
+      }
+      else {
+        this->traffic_[hops.back()][target_node][message_type].bad_count_++;
+        this->traffic_[hops.back()][target_node][message_type].bad_traffic_ += message_size;
+      }
+      traffic_lock.unlock();
 
       break;
 
@@ -854,7 +854,7 @@ vds::async_task<vds::expected<void>> vds::dht::network::dht_datagram_protocol::p
       last_index);
 
     this->service_traffic_ += datagram.data_size();
-    CHECK_EXPECTED_ASYNC(co_await this->transport_->write_async(datagram));
+    CHECK_EXPECTED_ASYNC(co_await this->transport_->write_async(std::move(datagram)));
 
     this->output_mutex_.lock();
   }
@@ -879,8 +879,8 @@ vds::async_task<vds::expected<void>> vds::dht::network::dht_datagram_protocol::p
           base64::from_bytes(this->partner_node_id_).c_str(),
           last_index + i + 1);
 
-        CHECK_EXPECTED_ASYNC(co_await this->transport_->write_async(datagram));
         this->service_traffic_ += datagram.data_size();
+        CHECK_EXPECTED_ASYNC(co_await this->transport_->write_async(std::move(datagram)));
 
         this->output_mutex_.lock();
       }

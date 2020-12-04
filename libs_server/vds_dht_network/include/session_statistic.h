@@ -128,12 +128,16 @@ namespace vds {
     };
 
     size_t send_queue_size_;
+    size_t sent_bypes_;
+    std::list<std::pair<std::string, uint32_t>> quota_;
+
     std::list<session_info> items_;
 
     std::shared_ptr<json_value> serialize() const {
       auto result = std::make_shared<json_object>();
       
       result->add_property("send_queue_size", std::to_string(this->send_queue_size_));
+      result->add_property("sent_bypes", std::to_string(this->sent_bypes_));
 
       auto items = std::make_shared<json_array>();
       for (const auto& p : this->items_) {
@@ -141,6 +145,16 @@ namespace vds {
       }
 
       result->add_property("items", items);
+
+      auto quota = std::make_shared<json_array>();
+      for (const auto& p : this->quota_) {
+        auto result = std::make_shared<json_object>();
+        result->add_property("address", p.first);
+        result->add_property("quota", std::to_string(p.second));
+        quota->add(result);
+      }
+
+      result->add_property("quota", quota);
 
       return result;
     }

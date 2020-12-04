@@ -48,13 +48,63 @@ void vds::dht::network::udp_transport::stop() {
 }
 
 vds::async_task<vds::expected<void>>
-vds::dht::network::udp_transport::write_async( const udp_datagram& datagram) {
+vds::dht::network::udp_transport::write_async(udp_datagram && datagram) {
   auto result = std::make_shared<vds::async_result<vds::expected<void>>>();
-  this->send_thread_->schedule([result, this, datagram]() ->expected<void> {
-    auto res = std::make_shared<expected<void>>(this->writer_->write_async(datagram).get());
-    mt_service::async(this->sp_, [res, result]() {
-      result->set_value(std::move(*res));
-    });
+  
+  this->send_mutex_.lock();
+  this->send_queue_.emplace_back(std::move(datagram), result);
+  this->send_mutex_.unlock();
+
+  this->send_thread_->schedule([pthis = this->shared_from_this()]() ->expected<void> {
+    auto this_ = static_cast<udp_transport*>(pthis.get());
+
+    uint32_t total_send_quota = 0;
+    uint32_t total_sent_by_quota = 0;
+
+
+    this_->send_mutex_.lock();
+    for (const auto& item : this_->quota_states_) {
+      total_send_quota += item.second.send_quota_;
+      if (item.second.send_quota_ > item.second.sent_data_) {
+        total_sent_by_quota += item.second.sent_data_;
+      } else {
+        total_sent_by_quota += item.second.sent_data_;
+      }
+    }
+
+    auto best_message = this_->send_queue_.begin();
+    uint32_t best_profit = 0;
+    auto best_quota = this_->quota_states_.end();
+    if (0 < total_send_quota) {
+      //80% for quoted data
+      const auto quota_value = 80 * this_->prev_sent_ / 100 / total_send_quota;
+
+      for (auto p = this_->send_queue_.begin(); this_->send_queue_.end() != p; ++p) {
+        auto q = this_->quota_states_.find(p->first.address());
+        if (this_->quota_states_.end() != q) {
+          const auto allow_send = q->second.send_quota_ * quota_value;
+          if (allow_send < q->second.sent_data_) {
+            const auto profit = q->second.sent_data_ - allow_send;
+            if (best_profit < profit) {
+              best_message = p;
+              best_profit = profit;
+              best_quota = q;
+            }
+          }
+        }
+      }
+    }
+
+    udp_datagram datagram = std::move(best_message->first);
+    std::shared_ptr<vds::async_result<vds::expected<void>>> result = std::move(best_message->second);
+    this_->send_queue_.erase(best_message);
+    if (this_->quota_states_.end() != best_quota) {
+      best_quota->second.sent_data_ += datagram.data_size();
+    }
+    this_->total_sent_ += datagram.data_size();
+    this_->send_mutex_.unlock();
+
+    result->set_value(this_->writer_->write_async(datagram).get());
     return expected<void>();
   });
 
@@ -157,11 +207,22 @@ vds::async_task<vds::expected<void>> vds::dht::network::udp_transport::on_timer(
     CHECK_EXPECTED_ASYNC(co_await s->on_timer());
   }
 
+  this->prev_sent_ = this->total_sent_;
+  this->total_sent_ = 0;
+
   co_return expected<void>();
 }
 
 void vds::dht::network::udp_transport::get_session_statistics(session_statistic& session_statistic) {
   session_statistic.send_queue_size_ = this->send_thread_->size();
+  session_statistic.sent_bypes_ = this->prev_sent_;
+  this->send_mutex_.lock();
+  for (const auto& item : this->quota_states_) {
+    session_statistic.quota_.emplace_back(item.first.to_string(), item.second.send_quota_);
+  }
+
+  this->send_mutex_.unlock();
+
 
   std::shared_lock<std::shared_mutex> lock(this->sessions_mutex_);
   for (const auto& p : this->sessions_) {
