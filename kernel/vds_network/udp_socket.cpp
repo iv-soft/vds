@@ -80,10 +80,6 @@ vds::udp_datagram& vds::udp_datagram::operator=(udp_datagram&& other) {
 
 }
 
-vds::async_task<vds::expected<void>> vds::udp_datagram_writer::write_async( const udp_datagram& message) {
-  return static_cast<_udp_send *>(this)->write_async(message);
-}
-
 vds::udp_socket::udp_socket()
 {
 }
@@ -100,37 +96,46 @@ sa_family_t vds::udp_socket::family() const
 
 #ifdef _WIN32
 
-vds::expected<std::shared_ptr<vds::udp_datagram_writer>>
+vds::expected<void>
 vds::udp_socket::start(const service_provider * sp, lambda_holder_t<async_task<expected<bool>>, expected<udp_datagram>> read_handler)
 {
   auto reader = new _udp_receive(sp, this->shared_from_this(), std::move(read_handler));
   reader->schedule_read();
 
-  return std::make_shared<_udp_send>(sp, this->shared_from_this());
+  return expected<void>();
+}
+
+vds::async_task<vds::expected<void>> vds::udp_socket::write_async(const service_provider* sp, const udp_datagram& message)
+{
+  return std::make_shared<_udp_send>(sp, this->shared_from_this())->write_async(message);
 }
 
 #else//_WIN32
-vds::expected<std::shared_ptr<vds::udp_datagram_writer>>
+vds::expected<void>
 vds::udp_socket::start(const service_provider * sp, lambda_holder_t<async_task<expected<bool>>, expected<udp_datagram>> read_handler)
 {
   return this->impl_->start(sp, this->shared_from_this(), std::move(read_handler));
 }
 
-vds::expected<std::shared_ptr<vds::udp_datagram_writer>>
+vds::expected<void>
 vds::_udp_socket::start(
   const vds::service_provider *sp,
   const std::shared_ptr<vds::socket_base> &owner,
   lambda_holder_t<async_task<expected<bool>>, expected<udp_datagram>> read_handler) {
 
   auto read_task = std::make_shared<_udp_receive>(sp, owner, std::move(read_handler));
-  auto write_task = std::make_shared<_udp_send>(sp, owner);
 
   this->read_task_ = read_task;
-  this->write_task_ = write_task;
 
   CHECK_EXPECTED(read_task->schedule_read());
-  return write_task;
+  return vds::expected<void>();
 }
+
+vds::async_task<vds::expected<void>> vds::udp_socket::write_async(const service_provider* sp, const udp_datagram& message)
+{
+  return this->impl_->write_async(this->shared_from_this(), message);
+}
+
 #endif
 
 void vds::udp_socket::stop()
@@ -288,19 +293,71 @@ vds::expected<void> vds::udp_socket::broadcast(sa_family_t af, const std::string
 
 #ifndef _WIN32
 vds::expected<void> vds::udp_socket::process(uint32_t events) {
-  return this->impl_->process(events);
+  return this->impl_->process(this->shared_from_this(), events);
 }
 
-vds::expected<void> vds::_udp_socket::process(uint32_t events) {
+vds::expected<void> vds::_udp_socket::process_write(const std::shared_ptr<socket_base> & owner) {
+  std::unique_lock<std::mutex> lock(this->event_masks_mutex_);
+  auto& item = this->write_tasks_.front();
+
+  auto size = item.first->data_size();
+  int len = sendto(
+    this->handle(),
+    item.first->data(),
+    size,
+    0,
+    item.first->address(),
+    item.first->address().size());
+
+  auto result = std::move(item.second);
+  if (len < 0) {
+    int error = errno;
+    if (EAGAIN == error) {
+      return expected<void>();
+    }
+
+    CHECK_EXPECTED(this->change_mask_(owner, 0, EPOLLOUT));
+    this->sp_->get<logger>()->trace(
+      "UDP",
+      "Error %d at sending UDP to %s",
+      error,
+      item.first->address().to_string().c_str());
+
+
+    auto address = item.first->address().to_string();
+
+    result->set_value(make_unexpected<std::system_error>(
+      error,
+      std::generic_category(),
+      "Send to " + address));
+    this->write_tasks_.pop();
+  }
+  else {
+    CHECK_EXPECTED(this->change_mask(owner, 0, EPOLLOUT));
+
+    this->sp_->get<logger>()->trace(
+      "UDP",
+      "Sent %d bytes UDP package to %s",
+      item.first->data_size(),
+      item.first->address().to_string().c_str());
+    if ((size_t)len != size) {
+      result->set_value(make_unexpected<std::runtime_error>("Invalid send UDP"));
+    }
+    else {
+      result->set_value(expected<void>());
+    }
+  }
+  return expected<void>();
+
+}
+
+vds::expected<void> vds::_udp_socket::process(const std::shared_ptr<socket_base>& owner, uint32_t events) {
   if (EPOLLOUT == (EPOLLOUT & events)) {
     if (0 == (this->event_masks_ & EPOLLOUT)) {
       return vds::make_unexpected<std::runtime_error>("Invalid state");
     }
 
-    auto w = this->write_task_.lock();
-    if(w) {
-      CHECK_EXPECTED(w->process());
-    }
+    CHECK_EXPECTED(this->process_write(owner));
   }
 
   if (EPOLLIN == (EPOLLIN & events)) {
@@ -325,7 +382,7 @@ vds::udp_server::~udp_server()
   delete this->impl_;
 }
 
-vds::expected<std::shared_ptr<vds::udp_datagram_writer>> vds::udp_server::start(
+vds::expected<void> vds::udp_server::start(
   const service_provider * sp,
   const network_address & address,
   lambda_holder_t<async_task<expected<bool>>, expected<udp_datagram>> read_handler)
@@ -351,6 +408,11 @@ const std::shared_ptr<vds::udp_socket> &vds::udp_server::socket() const {
 
 const vds::network_address& vds::udp_server::address() const {
   return this->impl_->address();
+}
+
+vds::async_task<vds::expected<void>> vds::udp_server::write_async(const service_provider* sp, const udp_datagram& message)
+{
+  return this->impl_->write_async(sp, message);
 }
 
 void vds::udp_server::prepare_to_stop() {

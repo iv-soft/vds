@@ -6,6 +6,7 @@ Copyright (c) 2017, Vadim Malyshev, lboss75@gmail.com
 All rights reserved
 */
 
+#include <queue>
 #include <udp_datagram_size_exception.h>
 #include <vds_exceptions.h>
 #include "network_types_p.h"
@@ -93,21 +94,29 @@ namespace vds {
     }
 
 #ifndef _WIN32
-    expected<std::shared_ptr<vds::udp_datagram_writer>>
+    expected<void>
     start(
         const service_provider * sp,
         const std::shared_ptr<socket_base> & owner,
         lambda_holder_t<async_task<expected<bool>>, expected<udp_datagram>> read_handler);
 
-    expected<void> process(uint32_t events);
+    expected<void> process(const std::shared_ptr<socket_base> & owner, uint32_t events);
+
+    expected<void> process_write(const std::shared_ptr<socket_base> & owner);
 
     expected<void>  change_mask(
-        const std::shared_ptr<socket_base> & owner,
-        uint32_t set_events,
-        uint32_t clear_events = 0)
+      const std::shared_ptr<socket_base>& owner,
+      uint32_t set_events,
+      uint32_t clear_events = 0)
     {
       std::unique_lock<std::mutex> lock(this->event_masks_mutex_);
-      auto last_mask = this->event_masks_;
+      return this->change_mask_(owner, set_events, clear_events);
+    }
+    expected<void>  change_mask_(
+      const std::shared_ptr<socket_base> &owner,
+      uint32_t set_events,
+      uint32_t clear_events) {
+        auto last_mask = this->event_masks_;
       this->event_masks_ |= set_events;
       this->event_masks_ &= ~clear_events;
 
@@ -127,6 +136,61 @@ namespace vds {
       return expected<void>();
     }
 
+    async_task<expected<void>> write_async(
+      std::shared_ptr<socket_base> owner,
+      const udp_datagram& message) {
+      auto r = std::make_shared<vds::async_result<vds::expected<void>>>();
+
+      std::unique_lock<std::mutex> lock(this->event_masks_mutex_);
+      if (EPOLLOUT == (this->event_masks_ & EPOLLOUT)) {
+        this->write_tasks_.emplace(message, std::move(r));
+      } else {
+        int len = sendto(
+          this->handle(),
+          message.data(),
+          message.data_size(),
+          0,
+          message.address(),
+          message.address().size());
+
+        if (len < 0) {
+          int error = errno;
+          if (EAGAIN == error) {
+            this->write_tasks_.emplace(message, std::move(r));
+            CHECK_EXPECTED(this->change_mask_(owner, EPOLLOUT, 0));
+          }
+          else {
+            auto address = message.address().to_string();
+
+            this->sp_->get<logger>()->trace(
+              "UDP",
+              "Error %d at sending UDP to %s",
+              error,
+              address.c_str());
+
+            r->set_value(make_unexpected<std::system_error>(
+              error,
+              std::generic_category(),
+              "Send to " + address));
+          }
+        }
+        else {
+          if ((size_t)len != message.data_size()) {
+            r->set_value(make_unexpected<std::runtime_error>("Invalid send UDP"));
+          }
+          else {
+            this->sp_->get<logger>()->trace(
+              "UDP",
+              "Sent %d bytes UDP package to %s",
+              message.data_size(),
+              message.address().to_string().c_str());
+            r->set_value(expected<void>());
+          }
+        }
+      }
+      return r->get_future();
+    }
+
 #endif//_WIN32
 
     void close()
@@ -137,6 +201,16 @@ namespace vds {
         this->s_ = INVALID_SOCKET;
       }
 #else
+      for (;;) {
+        std::unique_lock<std::mutex> lock(this->event_masks_mutex_);
+        if (this->write_tasks_.empty()) {
+          break;
+        }
+
+        this->write_tasks_.front().second->set_value(make_unexpected<shutdown_exception>());
+        this->write_tasks_.pop();
+      }
+
       if (0 <= this->s_) {
         shutdown(this->s_, 2);
         if (0 != this->event_masks_) {
@@ -157,7 +231,8 @@ namespace vds {
     uint32_t event_masks_;
 
     std::shared_ptr<class _udp_receive> read_task_;
-    std::weak_ptr<class _udp_send> write_task_;
+
+    std::queue<std::pair<udp_datagram, std::shared_ptr<async_result<expected<void>>>>> write_tasks_;
 
 #endif
   };
@@ -255,7 +330,7 @@ namespace vds {
     }
   };
 
-  class _udp_send : public _socket_task, public udp_datagram_writer
+  class _udp_send : public _socket_task, public std::enable_shared_from_this<_udp_send>
   {
   public:
     _udp_send(
@@ -280,7 +355,6 @@ namespace vds {
       auto r = std::make_shared<vds::async_result<vds::expected<void>>>();
       this->result_ = r;
 
-
       this->sp_->get<logger>()->trace(
         "UDP",
         "WSASendTo %s %d bytes (%s)",
@@ -288,6 +362,7 @@ namespace vds {
         this->buffer_.data_size(),
         base64::from_bytes(static_cast<const sockaddr *>(this->buffer_->address()), this->buffer_->address().size()).c_str()
       );
+      this->this_ = this->shared_from_this();
       if (NOERROR != WSASendTo(
         (*this->s_)->handle() ,
         &this->wsa_buf_,
@@ -308,6 +383,7 @@ namespace vds {
 
           r->set_value(make_unexpected<std::system_error>(errorCode, std::system_category(), "WSASend failed"));
           this->result_.reset();
+          this->this_.reset();
         }
       }
 
@@ -325,9 +401,12 @@ namespace vds {
 
     socklen_t addr_len_;
     udp_datagram buffer_;
+    std::shared_ptr<_udp_send> this_;
 
     void process(DWORD dwBytesTransfered) override
     {
+      std::shared_ptr<_udp_send> pthis(std::move(this->this_));
+
       this->sp_->get<logger>()->trace(
         "UDP",
         "Sent %d bytes UDP package to %s",
@@ -347,6 +426,7 @@ namespace vds {
 
     void error(DWORD error_code) override
     {
+      std::shared_ptr<_udp_send> pthis(std::move(this->this_));
       this->sp_->get<logger>()->trace(
         "UDP",
         "Error %d at sending UDP to %s",
@@ -480,128 +560,123 @@ namespace vds {
     }
   };
 
-  class _udp_send : public udp_datagram_writer {
-  public:
-    _udp_send(
-        const service_provider * sp,
-        const std::shared_ptr<socket_base> & owner)
-        : sp_(sp),
-          owner_(owner) {
+  //class _udp_send : public std::enable_shared_from_this<_udp_send> {
+  //public:
+  //  _udp_send(
+  //      const service_provider * sp)
+  //      : sp_(sp) {
 
-    }
+  //  }
 
-    vds::async_task<vds::expected<void>> write_async( const udp_datagram & message) {
-      auto r = std::make_shared<vds::async_result<vds::expected<void>>>();
-      int len = sendto(
-          (*this->owner())->handle(),
-          message.data(),
-          message.data_size(),
-          0,
-          message.address(),
-          message.address().size());
+  //  vds::async_task<vds::expected<void>> write_async(
+  //    std::shared_ptr<socket_base>& owner,
+  //    const udp_datagram & message) {
+  //    auto r = std::make_shared<vds::async_result<vds::expected<void>>>();
+  //    int len = sendto(
+  //      (*owner)->handle(),
+  //        message.data(),
+  //        message.data_size(),
+  //        0,
+  //        message.address(),
+  //        message.address().size());
 
-      if (len < 0) {
-        int error = errno;
-        if (EAGAIN == error) {
-          this->write_message_ = message;
-          this->write_result_ = r;
-          CHECK_EXPECTED((*this->owner())->change_mask(
-              this->owner_, EPOLLOUT));
-        }
-        else {
-          auto address = message.address().to_string();
+  //    if (len < 0) {
+  //      int error = errno;
+  //      if (EAGAIN == error) {
+  //        this->write_message_ = message;
+  //        this->write_result_ = r;
+  //        CHECK_EXPECTED((*this->owner())->change_mask(
+  //            this->owner_, EPOLLOUT));
+  //      }
+  //      else {
+  //        auto address = message.address().to_string();
 
-          this->sp_->get<logger>()->trace(
-            "UDP",
-            "Error %d at sending UDP to %s",
-            error,
-            address .c_str());
+  //        this->sp_->get<logger>()->trace(
+  //          "UDP",
+  //          "Error %d at sending UDP to %s",
+  //          error,
+  //          address .c_str());
 
-          r->set_value(make_unexpected<std::system_error>(
-            error,
-            std::generic_category(),
-            "Send to " + address));
+  //        r->set_value(make_unexpected<std::system_error>(
+  //          error,
+  //          std::generic_category(),
+  //          "Send to " + address));
 
-        }
-      }
-      else {
-        if ((size_t)len != message.data_size()) {
-          r->set_value(make_unexpected<std::runtime_error>("Invalid send UDP"));
-        }
-        else {
-          this->sp_->get<logger>()->trace(
-            "UDP",
-            "Sent %d bytes UDP package to %s",
-            message.data_size(),
-            message.address().to_string().c_str());
-          r->set_value(expected<void>());
-        }
-      }
+  //      }
+  //    }
+  //    else {
+  //      if ((size_t)len != message.data_size()) {
+  //        r->set_value(make_unexpected<std::runtime_error>("Invalid send UDP"));
+  //      }
+  //      else {
+  //        this->sp_->get<logger>()->trace(
+  //          "UDP",
+  //          "Sent %d bytes UDP package to %s",
+  //          message.data_size(),
+  //          message.address().to_string().c_str());
+  //        r->set_value(expected<void>());
+  //      }
+  //    }
 
-      return r->get_future();
-    }
+  //    return r->get_future();
+  //  }
 
-    expected<void> process(){
+  //  expected<void> process(){
 
-      auto size = this->write_message_.data_size();
-      int len = sendto(
-          (*this->owner())->handle(),
-          this->write_message_.data(),
-          size,
-          0,
-          this->write_message_.address(),
-          this->write_message_.address().size());
+  //    auto size = this->write_message_.data_size();
+  //    int len = sendto(
+  //        (*this->owner())->handle(),
+  //        this->write_message_.data(),
+  //        size,
+  //        0,
+  //        this->write_message_.address(),
+  //        this->write_message_.address().size());
 
-      auto result = std::move(this->write_result_);
-      if (len < 0) {
-        int error = errno;
-        if (EAGAIN == error) {
-          return expected<void>();
-        }
+  //    auto result = std::move(this->write_result_);
+  //    if (len < 0) {
+  //      int error = errno;
+  //      if (EAGAIN == error) {
+  //        return expected<void>();
+  //      }
 
-        CHECK_EXPECTED((*this->owner())->change_mask(this->owner_, 0, EPOLLOUT));
-        this->sp_->get<logger>()->trace(
-          "UDP",
-          "Error %d at sending UDP to %s",
-          error,
-          this->write_message_.address().to_string().c_str());
+  //      CHECK_EXPECTED((*this->owner())->change_mask(this->owner_, 0, EPOLLOUT));
+  //      this->sp_->get<logger>()->trace(
+  //        "UDP",
+  //        "Error %d at sending UDP to %s",
+  //        error,
+  //        this->write_message_.address().to_string().c_str());
 
 
-        auto address = this->write_message_.address().to_string();
+  //      auto address = this->write_message_.address().to_string();
 
-        result->set_value(make_unexpected<std::system_error>(
-              error,
-              std::generic_category(),
-              "Send to " + address));
-      }
-      else {
-          CHECK_EXPECTED((*this->owner())->change_mask(this->owner_, 0, EPOLLOUT));
+  //      result->set_value(make_unexpected<std::system_error>(
+  //            error,
+  //            std::generic_category(),
+  //            "Send to " + address));
+  //    }
+  //    else {
+  //        CHECK_EXPECTED((*this->owner())->change_mask(this->owner_, 0, EPOLLOUT));
 
-        this->sp_->get<logger>()->trace(
-          "UDP",
-          "Sent %d bytes UDP package to %s",
-          this->write_message_.data_size(),
-          this->write_message_.address().to_string().c_str());
-        if ((size_t)len != size) {
-          result->set_value(make_unexpected<std::runtime_error>("Invalid send UDP"));
-        }
-        else {
-          result->set_value(expected<void>());
-        }
-      }
-      return expected<void>();
-    }
+  //      this->sp_->get<logger>()->trace(
+  //        "UDP",
+  //        "Sent %d bytes UDP package to %s",
+  //        this->write_message_.data_size(),
+  //        this->write_message_.address().to_string().c_str());
+  //      if ((size_t)len != size) {
+  //        result->set_value(make_unexpected<std::runtime_error>("Invalid send UDP"));
+  //      }
+  //      else {
+  //        result->set_value(expected<void>());
+  //      }
+  //    }
+  //    return expected<void>();
+  //  }
 
-  private:
-    const service_provider * sp_;
-    std::shared_ptr<socket_base> owner_;
-    std::shared_ptr<vds::async_result<vds::expected<void>>> write_result_;
-    udp_datagram write_message_;
-
-    udp_socket * owner() const {
-      return static_cast<udp_socket *>(this->owner_.get());
-    }
-  };
+  //private:
+  //  const service_provider * sp_;
+  //  std::shared_ptr<vds::async_result<vds::expected<void>>> write_result_;
+  //  udp_datagram write_message_;
+  //};
 #endif//_WIN32
 
   class _udp_server
@@ -612,7 +687,7 @@ namespace vds {
     {
     }
 
-    expected<std::shared_ptr<udp_datagram_writer>> start(
+    expected<void> start(
       const service_provider * sp,
       lambda_holder_t<async_task<expected<bool>>, expected<udp_datagram>> read_handler)
     {
@@ -644,6 +719,11 @@ namespace vds {
     const network_address & address() const {
       return this->address_;
     }
+
+    async_task<expected<void>> write_async(const service_provider* sp, const udp_datagram& message) {
+      return this->socket_->write_async(sp, message);
+    }
+
   private:
     std::shared_ptr<udp_socket> socket_;
     network_address address_;

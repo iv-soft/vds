@@ -88,7 +88,7 @@ namespace vds {
 
                 f.second().then([&f, pthis](expected<result_type> callback_result) -> void {
                   if (callback_result.has_error()) {
-                    pthis->sp_->get<logger>()->warning("Core", "%s at process callback", callback_result.error()->what());
+                    logger::get(pthis->sp_)->warning("Core", "%s at process callback", callback_result.error()->what());
                   }
                   f.first.set_value(std::move(callback_result));
 
@@ -112,7 +112,7 @@ namespace vds {
 
                 f.second().then([&f, pthis](expected<result_type> callback_result) -> void {
                   if (callback_result.has_error()) {
-                    pthis->sp_->get<logger>()->warning("Core", "%s at process callback", callback_result.error()->what());
+                    logger::get(pthis->sp_)->warning("Core", "%s at process callback", callback_result.error()->what());
                   }
                   f.first.set_value(std::move(callback_result));
 

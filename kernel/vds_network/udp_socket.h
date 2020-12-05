@@ -60,11 +60,6 @@ namespace vds {
   //  vds::async_task<vds::expected<udp_datagram>> read_async();
   //};
 
-  class udp_datagram_writer : public std::enable_shared_from_this<udp_datagram_writer> {
-  public:
-    vds::async_task<vds::expected<void>> write_async( const udp_datagram & message);
-  };
-
 
   class udp_socket
 #ifndef _WIN32
@@ -85,8 +80,9 @@ namespace vds {
     udp_socket &operator = (const udp_socket & original) = delete;
     udp_socket & operator = (udp_socket && original);
 
-    expected<std::shared_ptr<udp_datagram_writer>>
-    start(const service_provider * sp, lambda_holder_t<async_task<expected<bool>>, expected<udp_datagram>> read_handler);
+    expected<void> start(const service_provider * sp, lambda_holder_t<async_task<expected<bool>>, expected<udp_datagram>> read_handler);
+
+    async_task<expected<void>> write_async(const service_provider* sp, const udp_datagram& message);
 
 #ifndef _WIN32
     void stop() override;
@@ -121,7 +117,7 @@ namespace vds {
     udp_server();
     ~udp_server();
 
-    expected<std::shared_ptr<udp_datagram_writer>> start(
+    expected<void> start(
       const service_provider * sp,
       const network_address & address,
       lambda_holder_t<async_task<expected<bool>>, expected<udp_datagram>> read_handler);
@@ -136,6 +132,7 @@ namespace vds {
     }
 
     const network_address & address() const;
+    async_task<expected<void>> write_async(const service_provider* sp, const udp_datagram& message);
 
   private:
     _udp_server * impl_;

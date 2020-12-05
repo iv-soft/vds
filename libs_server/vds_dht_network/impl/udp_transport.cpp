@@ -33,7 +33,7 @@ vds::expected<void> vds::dht::network::udp_transport::start(
   this->node_public_key_ = node_public_key;
   this->node_key_ = node_key;
 
-  GET_EXPECTED_VALUE(this->writer_, this->server_.start(sp, bind_interface,
+  CHECK_EXPECTED(this->server_.start(sp, bind_interface,
     [pthis = this->shared_from_this()](expected<udp_datagram> datagram_result) {
       return static_cast<udp_transport *>(pthis.get())->read_handler(std::move(datagram_result));
     }));
@@ -104,7 +104,7 @@ vds::dht::network::udp_transport::write_async(udp_datagram && datagram) {
     this_->total_sent_ += datagram.data_size();
     this_->send_mutex_.unlock();
 
-    result->set_value(this_->writer_->write_async(datagram).get());
+    result->set_value(this_->server_.write_async(this_->sp_, datagram).get());
     return expected<void>();
   });
 

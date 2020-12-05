@@ -58,8 +58,6 @@ namespace vds {
         std::shared_ptr<asymmetric_private_key> node_key_;
         udp_server server_;
 
-        std::shared_ptr<vds::udp_datagram_writer> writer_;
-
         std::shared_ptr<thread_apartment> send_thread_;
 
         struct quota_state_t {
