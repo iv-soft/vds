@@ -23,7 +23,7 @@ namespace vds {
       result->add_property("db_queue_length", std::to_string(this->db_queue_length_));
       result->add_property("current_user_folder", this->current_user_.full_name());
       result->add_property("local_machine_folder", this->local_machine_.full_name());
-      result->add_property("route", this->route_statistic_.serialize());
+      result->add_property("route", this->route_statistic_.serialize(true));
       result->add_property("session", this->session_statistic_.serialize());
       return result;
     }

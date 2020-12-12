@@ -49,13 +49,14 @@ void vds::dht::network::udp_transport::stop() {
 
 vds::async_task<vds::expected<void>>
 vds::dht::network::udp_transport::write_async(udp_datagram && datagram) {
+  auto start = std::chrono::steady_clock::now();
   auto result = std::make_shared<vds::async_result<vds::expected<void>>>();
   
   this->send_mutex_.lock();
   this->send_queue_.emplace_back(std::move(datagram), result);
   this->send_mutex_.unlock();
 
-  this->send_thread_->schedule([pthis = this->shared_from_this()]() ->expected<void> {
+  this->send_thread_->schedule([pthis = this->shared_from_this(), start]() ->expected<void> {
     auto this_ = static_cast<udp_transport*>(pthis.get());
 
     uint32_t total_send_quota = 0;
@@ -100,6 +101,9 @@ vds::dht::network::udp_transport::write_async(udp_datagram && datagram) {
     this_->send_queue_.erase(best_message);
     if (this_->quota_states_.end() != best_quota) {
       best_quota->second.sent_data_ += datagram.data_size();
+      best_quota->second.idle_ = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - best_quota->second.last_sent_).count();
+      best_quota->second.last_sent_ = std::chrono::steady_clock::now();
+      best_quota->second.delay_ = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start).count();
     }
     this_->total_sent_ += datagram.data_size();
     this_->send_mutex_.unlock();
@@ -218,7 +222,12 @@ void vds::dht::network::udp_transport::get_session_statistics(session_statistic&
   session_statistic.sent_bypes_ = this->prev_sent_;
   this->send_mutex_.lock();
   for (const auto& item : this->quota_states_) {
-    session_statistic.quota_.emplace_back(item.first.to_string(), item.second.send_quota_);
+    session_statistic.quota_.emplace_back(session_statistic::session_quota_info{
+      item.first.to_string(),
+      item.second.send_quota_,
+      item.second.sent_data_,
+      item.second.prev_sent_,
+      });
   }
 
   this->send_mutex_.unlock();

@@ -98,6 +98,15 @@ namespace vds {
       }
     };
 
+    struct session_quota_info {
+      std::string address_;
+      uint32_t quota_;
+      uint64_t sent_;
+      uint64_t sent1m_;
+      int idle_;
+      int delay_;
+    };
+
     struct session_info {
       std::string partner_;
       std::string address_;
@@ -129,7 +138,7 @@ namespace vds {
 
     size_t send_queue_size_;
     size_t sent_bypes_;
-    std::list<std::pair<std::string, uint32_t>> quota_;
+    std::list<session_quota_info> quota_;
 
     std::list<session_info> items_;
 
@@ -149,8 +158,12 @@ namespace vds {
       auto quota = std::make_shared<json_array>();
       for (const auto& p : this->quota_) {
         auto result = std::make_shared<json_object>();
-        result->add_property("address", p.first);
-        result->add_property("quota", std::to_string(p.second));
+        result->add_property("address", p.address_);
+        result->add_property("quota", std::to_string(p.quota_));
+        result->add_property("sent", std::to_string(p.sent_));
+        result->add_property("sent1m", std::to_string(p.sent1m_));
+        result->add_property("idle", std::to_string(p.idle_));
+        result->add_property("delay", std::to_string(p.delay_));
         quota->add(result);
       }
 

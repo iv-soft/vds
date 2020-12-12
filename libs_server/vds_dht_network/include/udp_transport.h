@@ -61,8 +61,13 @@ namespace vds {
         std::shared_ptr<thread_apartment> send_thread_;
 
         struct quota_state_t {
-          uint32_t sent_data_;
           uint32_t send_quota_;
+          uint32_t sent_data_;
+          uint32_t prev_sent_;
+          int idle_;
+          int delay_;
+
+          std::chrono::steady_clock::time_point last_sent_;
         };
 
         std::map<network_address, quota_state_t> quota_states_;
